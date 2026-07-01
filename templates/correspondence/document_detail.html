@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تفاصيل الخطاب - نظام المراسلات</title>
+    <!-- Bootstrap 5 RTL CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .navbar { background-color: #2b3e50 !important; }
+        .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .pdf-container { height: 500px; width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <!-- شريط الملاحة العلوي -->
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">نظام إدارة المراسلات والأرشيف</span>
+            <div class="d-flex align-items-center text-white">
+                <span class="me-3 small">مرحباً، {{ request.user.username }} ({{ user_profile.get_role_display }})</span>
+                <a href="{% url 'dashboard' %}" class="btn btn-sm btn-outline-light me-2">الرئيسية</a>
+                <a href="{% url 'user_logout' %}" class="btn btn-sm btn-outline-danger">تسجيل الخروج</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mb-5">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        <div class="row">
+            <!-- اليمين: بيانات الخطاب والـ PDF الرئيسي -->
+            <div class="col-lg-7 mb-4">
+                <div class="card card-custom p-4 h-100">
+                    <h5 class="fw-bold text-primary mb-3">تفاصيل المراسلة الرسمية</h5>
+                    <table class="table table-bordered small">
+                        <tr>
+                            <th class="table-light w-25">الرقم المرجعي</th>
+                            <td class="fw-bold text-secondary">{{ correspondence.reference_number }}</td>
+                        </tr>
+                        <tr>
+                            <th class="table-light">الموضوع / العنوان</th>
+                            <td>{{ correspondence.subject }}</td>
+                        </tr>
+                        <tr>
+                            <th class="table-light">تاريخ الخطاب</th>
+                            <td>{{ correspondence.document_date }}</td>
+                        </tr>
+                        <tr>
+                            <th class="table-light">الاتجاه والنطاق</th>
+                            <td>
+                                <span class="badge bg-secondary">{{ correspondence.get_direction_display }}</span>
+                                <span class="badge bg-dark">{{ correspondence.get_scope_display }}</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th class="table-light">المرسل</th>
+                            <td>
+                                {% if correspondence.sender_internal %}
+                                    {{ correspondence.sender_internal.username }} ({{ correspondence.sender_internal.profile.get_role_display }})
+                                {% elif correspondence.sender_external %}
+                                    {{ correspondence.sender_external.name }} ({{ correspondence.sender_external.get_category_display }})
+                                {% else %}
+                                    <span class="text-muted">غير محدد</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+
+                    <h6 class="fw-bold text-secondary mt-3 mb-2">عرض ملف الخطاب الأصلي:</h6>
+                    <!-- إطار عرض ملف الـ PDF مباشرة داخل الصفحة -->
+                    <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
+                </div>
+            </div>
+
+            <!-- اليسار: التوجيهات والقرارات الرقمية -->
+            <div class="col-lg-5 mb-4">
+                <div class="card card-custom p-4 h-100">
+                    <h5 class="fw-bold text-primary mb-4">التوجيهات والقرارات الرقمية</h5>
+
+                    <!-- في حال وجود توجيه مسبق للخطاب -->
+                    {% if existing_directive %}
+                        <div class="alert alert-info border-0 p-4 mb-3">
+                            <h6 class="fw-bold text-dark mb-2">توجيه رقمي معتمد:</h6>
+                            <p class="mb-3 lead small">{{ existing_directive.directive_text }}</p>
+                            <hr>
+                            <div class="small text-muted">
+                                <strong>أصدر بواسطة:</strong> {{ existing_directive.issued_by.username }} ({{ existing_directive.issued_by.profile.get_role_display }})<br>
+                                <strong>موجّه إلى الموظف:</strong> {{ existing_directive.assigned_to.username }} ({{ existing_directive.assigned_to.profile.get_role_display }})<br>
+                                <strong>بتاريخ:</strong> {{ existing_directive.created_at }}
+                            </div>
+                        </div>
+
+                        <!-- زر التنفيذ والأرشفة للموظف المستهدف فقط إذا كانت المعاملة بحالة "موجه" -->
+                        {% if correspondence.status == 'assigned' and existing_directive.assigned_to == request.user %}
+                            <form method="post" class="mt-3">
+                                {% csrf_token %}
+                                <button type="submit" name="archive_document" class="btn btn-success w-100 py-2 fw-bold">✓ تم تنفيذ المعاملة وأرشفتها</button>
+                            </form>
+                        {% endif %}
+
+                        <!-- رسالة نجاح الأرشفة إذا تحولت الحالة إلى "مؤرشف" -->
+                        {% if correspondence.status == 'archived' %}
+                            <div class="alert alert-success border-0 p-3 text-center fw-bold small">
+                                ✓ تم تنفيذ هذه المعاملة بنجاح وتعتبر مؤرشفة حالياً.
+                            </div>
+                        {% endif %}
+
+                    {% else %}
+                        <!-- إذا لم يوجد توجيه والمستخدم الحالي هو العميد أو نائبه -->
+                        {% if user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
+                            <form method="post">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="assigned_to" class="form-label small fw-bold">توجيه وإحالة المعاملة إلى الموظف المختص:</label>
+                                    <select name="assigned_to" class="form-select" id="assigned_to" required>
+                                        <option value="">-- اختر الموظف المستهدف --</option>
+                                        {% for staff in staff_users %}
+                                            <option value="{{ staff.id }}">{{ staff.username }} ({{ staff.profile.get_role_display }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="directive_text" class="form-label small fw-bold">نص التوجيه الرقمي (الأمر الإداري):</label>
+                                    <textarea name="directive_text" class="form-control" id="directive_text" rows="6" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">اعتماد التوجيه وإرسال المعاملة</button>
+                            </form>
+                        {% else %}
+                            <!-- إذا لم يكن عميداً والمستند لم يتم توجيهه بعد -->
+                            <div class="text-center py-5">
+                                <p class="text-muted">بانتظار صدور توجيه العميد أو نائبه على هذه المعاملة.</p>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

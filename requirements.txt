@@ -1,0 +1,4 @@
+Django==5.2.15
+python-decouple==3.8
+# فك التعليق عن السطر التالي فقط عند التشغيل على PostgreSQL (USE_POSTGRES=True في .env)
+# psycopg2-binary==2.9.9
