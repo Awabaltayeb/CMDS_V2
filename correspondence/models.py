@@ -43,17 +43,17 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.get_role_display()}"
 
-# إشارات تلقائية لإنشاء بروفايل فور إنشاء مستخدم جديد
+# إشارة تلقائية آمنة تمنع التعارض والتكرار أثناء عمليات استيراد النسخ الاحتياطية (loaddata / fixtures)
 @receiver(post_save, sender=User)
-def create_user_profile(sender, instance, created, **kwargs):
-    if created:
-        UserProfile.objects.create(user=instance)
-
-@receiver(post_save, sender=User)
-def save_user_profile(sender, instance, **kwargs):
-    if not hasattr(instance, 'profile'):
-        UserProfile.objects.create(user=instance)
-    instance.profile.save()
+def create_or_save_user_profile(sender, instance, created, raw=False, **kwargs):
+    if raw:
+        # حظر التنفيذ عند جلب بيانات الأرشيف من النسخة الاحتياطية لمنع الانهيار
+        return
+    
+    # استخدام get_or_create لتفادي محاولات الحفظ المكررة العشوائية
+    profile, created_now = UserProfile.objects.get_or_create(user=instance)
+    if not created_now:
+        profile.save()
 
 
 # 2. الجهات الخارجية (الكليات الأخرى والإدارات المركزية)
