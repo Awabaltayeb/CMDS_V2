@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 from decouple import config, Csv
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,6 +32,12 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost', cast=Csv())
 
+# الكشف التلقائي عن نطاق خادم Render لضمان القبول المباشر
+RENDER_EXTERNAL_HOSTNAME = config('RENDER_EXTERNAL_HOSTNAME', default='')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    ALLOWED_HOSTS.append('.onrender.com')
+
 
 # Application definition
 
@@ -46,6 +53,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # وايت نويز لخدمة الملفات الساكنة بكفاءة عالية
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,16 +89,13 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # لتفعيل PostgreSQL وقت النشر الفعلي، ضع USE_POSTGRES=True في ملف .env
 # واملأ بيانات الاتصال (DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT).
 
-if config('USE_POSTGRES', default=False, cast=bool):
+if config('USE_POSTGRES', default=False, cast=bool) or config('DATABASE_URL', default=''):
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': config('DB_NAME', default='cdms_db'),
-            'USER': config('DB_USER', default='postgres_user'),
-            'PASSWORD': config('DB_PASSWORD', default=''),
-            'HOST': config('DB_HOST', default='localhost'),
-            'PORT': config('DB_PORT', default='5432'),
-        }
+        'default': dj_database_url.config(
+            default=config('DATABASE_URL', default=''),
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
 else:
     DATABASES = {
@@ -136,8 +141,18 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-# مجلد تجميع الملفات الثابتة وقت النشر الفعلي (يُستخدم بأمر collectstatic)
+# مجلد تجميع الملفات الثابتة وقت النشر الفعلي (يُسخدم بأمر collectstatic)
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# تهيئة إدارة تخزين الملفات الساكنة في بيئة الإنتاج متوافقة مع Django 5.x و WhiteNoise
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
