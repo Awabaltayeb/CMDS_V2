@@ -9,7 +9,7 @@ from django.db.models import Q
 from django.db import transaction
 from django.http import FileResponse
 from django.utils import timezone
-from django.core.mail import send_mail  # استدعاء مكتبة إرسال الإيميلات الفورية
+from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive
 from .backup_utils import create_backup, apply_retention_policy
 
@@ -25,17 +25,23 @@ def dashboard(request):
     user_profile = request.user.profile
     role = user_profile.role
     
+    # تحسين الاستعلامات بجلب النماذج المترابطة دفعة واحدة (تخفيض عبء N+1 استعلام لقاعدة البيانات)
+    base_queryset = Correspondence.objects.select_related(
+        'sender_internal__profile', 'sender_external',
+        'recipient_internal__profile', 'recipient_external'
+    )
+
     if role == 'secretary':
-        correspondences = Correspondence.objects.all().order_by('-created_at')
+        correspondences = base_queryset.all().order_by('-created_at')
     elif role in ['dean', 'vice_dean']:
-        correspondences = Correspondence.objects.all().order_by('-created_at')
+        correspondences = base_queryset.all().order_by('-created_at')
     else:
-        correspondences = Correspondence.objects.filter(
+        correspondences = base_queryset.filter(
             directives__assigned_to=request.user
         ).distinct().order_by('-created_at')
 
     # --- البحث والفلترة ---
-    # كل الفلاتر تُطبَّق فوق النطاق المسموح للدور أصلاً (ما بتوسّع صلاحية الرؤية)
+    # كل الفلاتر تُطبَّق فوق النطاق المسموح للدور أصلاً
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -153,11 +159,17 @@ def upload_document(request):
         if recipient_external_id:
             correspondence.recipient_external_id = recipient_external_id
 
-        # التحقق من صحة الملف (الامتداد والحجم) قبل الحفظ الفعلي
+        # تفكيك رسائل خطأ التحقق بصورة مرنة ومستقرة ومضادة للأخطاء
         try:
             correspondence.full_clean()
         except ValidationError as e:
-            messages.error(request, ' '.join(sum(e.message_dict.values(), [])))
+            error_messages = []
+            if hasattr(e, 'message_dict'):
+                for field, errors in e.message_dict.items():
+                    error_messages.extend(errors)
+            else:
+                error_messages.extend(e.messages)
+            messages.error(request, ' | '.join(error_messages))
             return redirect('upload_document')
 
         correspondence.save()
@@ -212,20 +224,23 @@ def document_detail(request, pk):
             if assigned_to_id and directive_text:
                 assigned_to_user = get_object_or_404(User, pk=assigned_to_id)
                 
-                # إنشاء التوجيه الرقمي
-                with transaction.atomic():
-                    Directive.objects.create(
-                    correspondence=correspondence,
-                    issued_by=request.user,
-                    assigned_to=assigned_to_user,
-                    directive_text=directive_text
-                    )
-
-                    # تحديث حالة المعاملة وتسجيل بيانات المعالجة لقفلها
-                correspondence.status = 'assigned'
-                correspondence.handled_by = request.user
-                correspondence.handled_at = timezone.now()
-                correspondence.save()
+                # تنفيذ كامل لعملية تغيير الحالة وإنشاء التوجيه في بيئة معزولة معاملتياً (transaction.atomic)
+                try:
+                    with transaction.atomic():
+                        Directive.objects.create(
+                            correspondence=correspondence,
+                            issued_by=request.user,
+                            assigned_to=assigned_to_user,
+                            directive_text=directive_text
+                        )
+                        # تحديث حالة المعاملة وتسجيل بيانات المعالجة لقفلها
+                        correspondence.status = 'assigned'
+                        correspondence.handled_by = request.user
+                        correspondence.handled_at = timezone.now()
+                        correspondence.save()
+                except Exception as db_err:
+                    messages.error(request, f'حدث خطأ غير متوقع أثناء الحفظ في قاعدة البيانات: {str(db_err)}')
+                    return redirect('dashboard')
                 
                 # ميزة إرسال إيميل فوري للموظف الموجه إليه الخطاب بشكل آمن (محمي ضد توقف الإنترنت)
                 try:
@@ -234,7 +249,7 @@ def document_detail(request, pk):
                         message=f'مرحباً {assigned_to_user.username}، تم توجيه معاملة جديدة إليك من قِبل العميد. نص التوجيه: {directive_text}. يرجى مراجعة صندوق المراسلات.',
                         from_email='archive-system@college.edu',
                         recipient_list=[assigned_to_user.email],
-                        fail_silently=True, # حماية النظام من الانهيار إذا لم تكن هناك إنترنت
+                        fail_silently=True,  # حماية النظام من الانهيار إذا لم تكن هناك إنترنت
                     )
                 except Exception:
                     pass
