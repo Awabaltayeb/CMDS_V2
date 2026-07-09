@@ -19,7 +19,7 @@
     <!-- شريط الملاحة العلوي -->
     <nav class="navbar navbar-dark bg-dark mb-4">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1"><i class="bi bi-envelope-open-fill me-2"></i> نظام إدارة المراسلات والأرشيف</span>
+            <span class="navbar-brand mb-0 h1"><i class="bi bi-envelope-open-fill me-2"></i> نظام CDMS</span>
             <div class="d-flex align-items-center text-white">
                 <span class="me-3 small">مرحباً، {{ request.user.username }} ({{ user_profile.get_role_display }})</span>
                 <a href="{% url 'dashboard' %}" class="btn btn-sm btn-outline-light me-2"><i class="bi bi-house-door-fill"></i> الرئيسية</a>
@@ -38,7 +38,12 @@
             <!-- اليمين: بيانات الخطاب والـ PDF الرئيسي -->
             <div class="col-lg-7 mb-4">
                 <div class="card card-custom p-4 h-100">
-                    <h5 class="fw-bold text-primary mb-3"><i class="bi bi-file-earmark-text-fill"></i> تفاصيل المراسلة الرسمية</h5>
+                    <h5 class="fw-bold text-primary mb-3">
+                        <i class="bi bi-file-earmark-text-fill"></i> تفاصيل المراسلة الرسمية
+                        {% if correspondence.is_confidential %}
+                            <span class="badge bg-danger ms-2"><i class="bi bi-shield-lock-fill"></i> سري للغاية 🔒</span>
+                        {% endif %}
+                    </h5>
                     <table class="table table-bordered small">
                         <tr>
                             <th class="table-light w-25">الرقم المرجعي</th>
@@ -91,7 +96,7 @@
                             <hr>
                             <div class="small text-muted">
                                 <strong>أصدر بواسطة:</strong> {{ existing_directive.issued_by.username }} ({{ existing_directive.issued_by.profile.get_role_display }})<br>
-                                <strong>موجّه إلى الموظف:</strong> {{ existing_directive.assigned_to.username }} ({{ existing_directive.assigned_to.profile.get_role_display }})<br>
+                                <strong>موجّه إلى:</strong> {{ existing_directive.assigned_to.username }} ({{ existing_directive.assigned_to.profile.get_role_display }})<br>
                                 <strong>بتاريخ:</strong> {{ existing_directive.created_at }}
                             </div>
                         </div>
@@ -112,7 +117,7 @@
                         {% endif %}
 
                     {% else %}
-                        <!-- 1. نموذج رئيس القسم (إذا كانت المعاملة "قيد توصية رئيس القسم" والمستخدم هو رئيس قسم) -->
+                        <!-- 1. نموذج رئيس القسم (إذا كان الخطاب ينتظر توصيته وهو رئيس القسم) -->
                         {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
                             <form method="post">
                                 {% csrf_token %}
@@ -123,7 +128,18 @@
                                 <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
                             </form>
 
-                        <!-- 2. نموذج العميد المعتاد (إذا كانت المعاملة قيد المراجعة والمستخدم هو العميد أو نائبه) -->
+                        <!-- 2. نموذج المسجل العام (إذا كان الخطاب ينتظر اعتماده وهو المسجل العام) -->
+                        {% elif correspondence.status == 'pending_g_registrar' and user_profile.role == 'general_registrar' %}
+                            <form method="post">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="reg_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> تدقيق واعتماد المسجل العام الموجه للعميد:</label>
+                                    <textarea name="reg_note" class="form-control" id="reg_note" rows="5" required placeholder="يرجى كتابة ملاحظة الاعتماد على خطاب المسجل الفرعي هنا..."></textarea>
+                                </div>
+                                <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
+                            </form>
+
+                        <!-- 3. نموذج العميد المعتاد (إذا كانت المعاملة قيد المراجعة والمستخدم هو العميد أو نائبه) -->
                         {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
                             <form method="post">
                                 {% csrf_token %}
@@ -154,9 +170,9 @@
                             </form>
 
                         {% else %}
-                            <!-- إذا لم يوجد توجيه بعد وبانتظار الإجراء -->
+                            <!-- إذا لم يوجد إجراء بعد وبانتظار الإجراء -->
                             <div class="text-center py-5">
-                                <p class="text-muted"><i class="bi bi-hourglass-split"></i> بانتظار اتخاذ الإجراء المناسب على هذه المعاملة.</p>
+                                <p class="text-muted"><i class="bi bi-hourglass-split"></i> بانتظار اتخاذ الإجراء الإداري الهرمي المناسب على هذه المعاملة.</p>
                             </div>
                         {% endif %}
                     {% endif %}
