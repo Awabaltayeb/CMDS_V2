@@ -14,13 +14,15 @@ def validate_file_size(file):
         raise ValidationError(f'حجم الملف يتجاوز الحد الأقصى المسموح ({MAX_UPLOAD_SIZE_MB} ميجابايت).')
 
 class UserProfile(models.Model):
+    # إضافة الأدوار التفصيلية المعتمدة للمسجلين والكلية
     ROLE_CHOICES = [
         ('secretary', 'سكرتير'),
-        ('dean', 'عميد'),
-        ('vice_dean', 'نائب عميد'),
-        ('registrar', 'مسجل'),
-        ('department_head', 'رئيس قسم'),
-        ('admin_supervisor', 'مشرف إداري'),
+        ('dean', 'عميد الكلية'),
+        ('vice_dean', 'نائب عميد الكلية'),
+        ('general_registrar', 'المسجل العام للكلية'),
+        ('student_registrar', 'مسجل شؤون الطلاب'),
+        ('exams_registrar', 'مسجل الامتحانات'),
+        ('department_head', 'رئيس قسم بالكلية'),
         ('faculty_member', 'أستاذ/أستاذة'),
     ]
     DEPT_CHOICES = [
@@ -100,7 +102,8 @@ class Correspondence(models.Model):
     ]
     STATUS_CHOICES = [
         ('uploaded', 'مرفوع'),
-        ('pending_hod', 'قيد توصية رئيس القسم'),  # الحالة الجديدة للمسار الهرمي
+        ('pending_hod', 'قيد توصية رئيس القسم'),
+        ('pending_g_registrar', 'قيد مراجعة المسجل العام'),
         ('pending_dean', 'قيد المراجعة عند العميد/نائبه'),
         ('assigned', 'موجه'),
         ('archived', 'منفذ / مؤرشف'),
@@ -111,6 +114,7 @@ class Correspondence(models.Model):
     scope = models.CharField(max_length=15, choices=SCOPE_CHOICES, verbose_name="النطاق")
     addressed_to_type = models.CharField(max_length=10, choices=ADDRESSED_CHOICES, verbose_name="المخاطب الفعلي")
     subject = models.CharField(max_length=255, verbose_name="عنوان الخطاب / الموضوع")
+    is_confidential = models.BooleanField(default=False, verbose_name="سري للغاية")  # حقل السرية الجديد
     
     sender_internal = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_correspondences', verbose_name="المرسل الداخلي")
     sender_external = models.ForeignKey(ExternalEntity, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_correspondences', verbose_name="المرسل الخارجي")
@@ -149,13 +153,15 @@ class Correspondence(models.Model):
             count = ReferenceCounter.get_next_number(self.direction, self.scope, year)
             self.reference_number = f"{dir_code}-{scope_code}-{year}-{count:05d}"
         
-        # منطق التوجيه الهرمي التلقائي:
+        # التوجيه التلقائي الهرمي المطور لسرية مسارات الكلية:
         if self.status == 'uploaded':
-            # إذا كان رافع الخطاب أستاذاً بالكلية، يذهب لرئيس قسمه أولاً للتوصية
-            if hasattr(self.created_by, 'profile') and self.created_by.profile.role == 'faculty_member':
-                self.status = 'pending_hod'
+            role = self.created_by.profile.role
+            if role == 'faculty_member':
+                self.status = 'pending_hod'  # يذهب أولاً لرئيس القسم
+            elif role in ['student_registrar', 'exams_registrar']:
+                self.status = 'pending_g_registrar'  # يذهب أولاً للمسجل العام
             else:
-                self.status = 'pending_dean'
+                self.status = 'pending_dean'  # يذهب للعميد مباشرة
                 
         super().save(*args, **kwargs)
 
