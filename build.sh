@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# إيقاف التثبيت الفوري في حال حدوث أي مشكلة طارئة
+# exit on error
 set -o errexit
 
-# تثبيت متطلبات بايثون الأساسية
+# 1. تثبيت المكتبات
 pip install -r requirements.txt
 
-# جمع الملفات الساكنة بكفاءة باستخدام WhiteNoise
+# 2. السطر السحري الجديد لتوليد ملفات ترحيل قاعدة البيانات تلقائياً على السيرفر
+python manage.py makemigrations --no-input
+
+# 3. تجميع التنسيقات
 python manage.py collectstatic --no-input
 
-# تحديث بنية الجداول وقواعد البيانات
+# 4. تطبيق التحديثات وبناء الجداول على السيرفر
 python manage.py migrate
-
-# إنشاء مستخدم مسؤول تلقائياً في حال لم يكن موجوداً مسبقاً
-python manage.py shell -c "from django.contrib.auth.models import User; User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin', 'admin@college.edu', 'AdminPass123!')"
