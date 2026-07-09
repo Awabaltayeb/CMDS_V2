@@ -6,7 +6,7 @@
     <title>تفاصيل الخطاب - نظام المراسلات</title>
     <!-- Bootstrap 5 RTL CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
-    <!-- رابط تفعيل أيقونات بوتستراب العالمية -->
+    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
@@ -74,7 +74,6 @@
                     </table>
 
                     <h6 class="fw-bold text-secondary mt-3 mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> عرض ملف الخطاب الأصلي:</h6>
-                    <!-- إطار عرض ملف الـ PDF مباشرة داخل الصفحة -->
                     <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
                 </div>
             </div>
@@ -87,7 +86,7 @@
                     <!-- في حال وجود توجيه مسبق للخطاب -->
                     {% if existing_directive %}
                         <div class="alert alert-info border-0 p-4 mb-3">
-                            <h6 class="fw-bold text-dark mb-2"><i class="bi bi-info-circle-fill"></i> توجيه رقمي معتمد:</h6>
+                            <h6 class="fw-bold text-dark mb-2"><i class="bi bi-info-circle-fill"></i> توجيه معتمد:</h6>
                             <p class="mb-3 lead small">{{ existing_directive.directive_text }}</p>
                             <hr>
                             <div class="small text-muted">
@@ -113,13 +112,23 @@
                         {% endif %}
 
                     {% else %}
-                        <!-- إذا لم يوجد توجيه والمستخدم الحالي هو العميد أو نائبه -->
-                        {% if user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
-                            <!-- في حالة رغبة العميد في التوجيه المعتاد -->
+                        <!-- 1. نموذج رئيس القسم (إذا كانت المعاملة "قيد توصية رئيس القسم" والمستخدم هو رئيس قسم) -->
+                        {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
                             <form method="post">
                                 {% csrf_token %}
                                 <div class="mb-3">
-                                    <label for="assigned_to" class="form-label small fw-bold">توجيه وإحالة المعاملة إلى الموظف المختص:</label>
+                                    <label for="hod_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> توصية وإفادة رئيس القسم الموجهة للعميد:</label>
+                                    <textarea name="hod_note" class="form-control" id="hod_note" rows="5" required placeholder="يرجى كتابة توصيتك الإدارية على خطاب الأستاذ هنا..."></textarea>
+                                </div>
+                                <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
+                            </form>
+
+                        <!-- 2. نموذج العميد المعتاد (إذا كانت المعاملة قيد المراجعة والمستخدم هو العميد أو نائبه) -->
+                        {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
+                            <form method="post">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="assigned_to" class="form-label small fw-bold"><i class="bi bi-person-fill-gear"></i> توجيه وإحالة المعاملة إلى الموظف المختص:</label>
                                     <select name="assigned_to" class="form-select" id="assigned_to" required>
                                         <option value="">-- اختر الموظف المستهدف --</option>
                                         {% for staff in staff_users %}
@@ -129,7 +138,7 @@
                                 </div>
 
                                 <div class="mb-3">
-                                    <label for="directive_text" class="form-label small fw-bold">نص التوجيه الرقمي (الأمر الإداري):</label>
+                                    <label for="directive_text" class="form-label small fw-bold"><i class="bi bi-chat-text-fill"></i> نص التوجيه الرقمي (الأمر الإداري):</label>
                                     <textarea name="directive_text" class="form-control" id="directive_text" rows="6" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
                                 </div>
 
@@ -145,9 +154,9 @@
                             </form>
 
                         {% else %}
-                            <!-- إذا لم يكن عميداً والمستند لم يتم توجيهه بعد -->
+                            <!-- إذا لم يوجد توجيه بعد وبانتظار الإجراء -->
                             <div class="text-center py-5">
-                                <p class="text-muted"><i class="bi bi-hourglass-split"></i> بانتظار صدور توجيه العميد أو نائبه على هذه المعاملة.</p>
+                                <p class="text-muted"><i class="bi bi-hourglass-split"></i> بانتظار اتخاذ الإجراء المناسب على هذه المعاملة.</p>
                             </div>
                         {% endif %}
                     {% endif %}
