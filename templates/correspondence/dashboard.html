@@ -6,141 +6,179 @@
     <title>لوحة التحكم - إدارة المراسلات</title>
     <!-- Bootstrap 5 RTL CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
-    <!-- رابط تفعيل أيقونات بوتستراب العالمية -->
+    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
-        .navbar { background-color: #2b3e50 !important; }
-        .card-stat { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .sidebar { background-color: #1a252f; min-height: 100vh; color: white; }
+        .sidebar .nav-link { color: #cfd8dc; transition: 0.2s; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { color: white; background-color: #34495e; border-radius: 4px; }
+        .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
     </style>
 </head>
 <body>
-    <!-- شريط الملاحة العلوي -->
-    <nav class="navbar navbar-dark bg-dark mb-4">
-        <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1"><i class="bi bi-envelope-open-fill me-2"></i> نظام إدارة المراسلات والأرشيف</span>
-            <div class="d-flex align-items-center text-white">
-                <span class="me-3 small">مرحباً، {{ request.user.username }} ({{ user_profile.get_role_display }})</span>
-                <a href="{% url 'user_logout' %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-box-arrow-right"></i> تسجيل الخروج</a>
-            </div>
-        </div>
-    </nav>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- الشريط الجانبي الأيمن الثابت (RTL Sidebar) -->
+            <div class="col-md-3 col-lg-2 sidebar p-3 d-flex flex-column">
+                <div class="text-center my-3">
+                    <h5 class="fw-bold text-white"><i class="bi bi-envelope-open-fill me-2"></i> نظام CDMS</h5>
+                    <p class="text-muted small">كلية علوم الحاسوب</p>
+                </div>
+                <hr class="text-muted">
+                
+                <!-- بروفايل المستخدم الحالي -->
+                <div class="mb-4 text-center">
+                    <div class="avatar bg-primary text-white rounded-circle d-inline-flex justify-content-center align-items-center mb-2" style="width: 50px; height: 50px;">
+                        <i class="bi bi-person-fill fs-3"></i>
+                    </div>
+                    <h6 class="text-white mb-0 small">{{ request.user.username }}</h6>
+                    <span class="badge bg-secondary text-white small" style="font-size: 0.75rem;">{{ user_profile.get_role_display }}</span>
+                </div>
 
-    <div class="container">
-        <!-- رسائل النظام (نجاح / خطأ) -->
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-
-        <!-- نموذج البحث والفلترة -->
-        <div class="card card-stat p-3 mb-4">
-            <form method="get" class="row g-2 align-items-end">
-                <div class="col-md-4">
-                    <label class="form-label small fw-bold"><i class="bi bi-search"></i> بحث (موضوع الخطاب / الرقم المرجعي)</label>
-                    <input type="text" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="مثال: طلب ميزانية">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold">الحالة</label>
-                    <select name="status" class="form-select form-select-sm">
-                        <option value="">الكل</option>
-                        {% for value, label in status_choices %}
-                            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold">الاتجاه</label>
-                    <select name="direction" class="form-select form-select-sm">
-                        <option value="">الكل</option>
-                        {% for value, label in direction_choices %}
-                            <option value="{{ value }}" {% if direction_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small fw-bold">النطاق</label>
-                    <select name="scope" class="form-select form-select-sm">
-                        <option value="">الكل</option>
-                        {% for value, label in scope_choices %}
-                            <option value="{{ value }}" {% if scope_filter == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-1">
-                    <label class="form-label small fw-bold">من تاريخ</label>
-                    <input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
-                </div>
-                <div class="col-md-1">
-                    <label class="form-label small fw-bold">إلى تاريخ</label>
-                    <input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
-                </div>
-                <div class="col-12 mt-2">
-                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel-fill"></i> تصفية وتطبيق</button>
-                    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-counterclockwise"></i> تفريغ الفلاتر</a>
-                    <span class="text-muted small ms-2">{{ correspondences|length }} نتيجة</span>
-                </div>
-            </form>
-        </div>
-
-        <!-- جدول الخطابات والمراسلات -->
-        <div class="card card-stat p-4 mb-4">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h5 class="fw-bold text-primary mb-0"><i class="bi bi-folder-fill"></i> صندوق المراسلات والخطابات الرسمية</h5>
-                <div class="d-flex align-items-center gap-2">
-                    {% if user_profile.role in backup_allowed_roles %}
-                        <a href="{% url 'download_backup' %}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-database-down"></i> نسخة احتياطية 💾</a>
-                    {% endif %}
+                <ul class="nav flex-column gap-2 mb-auto">
+                    <li class="nav-item">
+                        <a href="{% url 'dashboard' %}" class="nav-link {% if not active_folder %}active{% endif %}"><i class="bi bi-speedometer2"></i> الرئيسية</a>
+                    </li>
                     {% if user_profile.role in upload_allowed_roles %}
-                        <a href="{% url 'upload_document' %}" class="btn btn-success btn-sm"><i class="bi bi-plus-circle-fill"></i> تسجيل خطاب جديد +</a>
+                    <li class="nav-item">
+                        <a href="{% url 'upload_document' %}" class="nav-link text-success"><i class="bi bi-plus-circle-fill"></i> تسجيل خطاب +</a>
+                    </li>
                     {% endif %}
-                </div>
+                    
+                    <hr class="text-muted my-2">
+                    <p class="small text-muted fw-bold mb-1"><i class="bi bi-folder-fill"></i> مجلدات الأرشيف الذكية</p>
+                    
+                    <li class="nav-item">
+                        <a href="?folder=internal" class="nav-link {% if active_folder == 'internal' %}active{% endif %}"><i class="bi bi-folder2-open text-primary"></i> المراسلات الداخلية</a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="?folder=inter_faculty" class="nav-link {% if active_folder == 'inter_faculty' %}active{% endif %}"><i class="bi bi-folder2-open text-warning"></i> بين الكليات</a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="?folder=central_admin" class="nav-link {% if active_folder == 'central_admin' %}active{% endif %}"><i class="bi bi-folder2-open text-danger"></i> إدارات مركزية</a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="?folder=cs" class="nav-link {% if active_folder == 'cs' %}active{% endif %}"><i class="bi bi-folder2-open text-info"></i> قسم علوم الحاسوب</a>
+                    </li>
+                </ul>
+                
+                <hr class="text-muted">
+                <a href="{% url 'user_logout' %}" class="btn btn-sm btn-outline-danger w-100 mb-3"><i class="bi bi-box-arrow-right"></i> تسجيل الخروج</a>
             </div>
 
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>الرقم المرجعي</th>
-                            <th>عنوان الخطاب / الموضوع</th>
-                            <th>الاتجاه</th>
-                            <th>النطاق</th>
-                            <th>تاريخ الخطاب</th>
-                            <th>الحالة</th>
-                            <th>التحكم</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for doc in correspondences %}
-                            <tr>
-                                <td class="fw-bold text-secondary">{{ doc.reference_number }}</td>
-                                <td>{{ doc.subject }}</td>
-                                <td><span class="badge bg-secondary">{{ doc.get_direction_display }}</span></td>
-                                <td>{{ doc.get_scope_display }}</td>
-                                <td>{{ doc.document_date }}</td>
-                                <td>
-                                    {% if doc.status == 'pending_dean' %}
-                                        <span class="badge bg-warning text-dark">{{ doc.get_status_display }}</span>
-                                    {% elif doc.status == 'assigned' %}
-                                        <span class="badge bg-info text-dark">{{ doc.get_status_display }}</span>
-                                    {% elif doc.status == 'archived' %}
-                                        <span class="badge bg-success">{{ doc.get_status_display }}</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">{{ doc.get_status_display }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <a href="{% url 'document_detail' doc.id %}" class="btn btn-sm btn-primary"><i class="bi bi-eye-fill"></i> عرض وتوجيه</a>
-                                </td>
-                            </tr>
-                        {% empty %}
-                            <tr>
-                                <td colspan="7" class="text-center text-muted py-4">لا توجد مراسلات أو خطابات حالياً في صندوقك.</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <!-- المحتوى الرئيسي للوحة المعلومات (Dashboard Main Content) -->
+            <div class="col-md-9 col-lg-10 p-4">
+                <!-- رسائل النظام -->
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+
+                <!-- بطاقات الإحصائيات العلوية -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card card-custom p-3 bg-white border-start border-primary border-4">
+                            <span class="text-muted small fw-bold">إجمالي المعاملات</span>
+                            <h3 class="fw-bold text-dark mt-1">{{ correspondences|length }}</h3>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card card-custom p-3 bg-white border-start border-warning border-4">
+                            <span class="text-muted small fw-bold">معاملات معلقة</span>
+                            <h3 class="fw-bold text-warning mt-1">⏳</h3>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card card-custom p-3 bg-white border-start border-success border-4">
+                            <span class="text-muted small fw-bold">منفذة ومؤرشفة</span>
+                            <h3 class="fw-bold text-success mt-1">✓</h3>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card card-custom p-3 bg-white border-start border-secondary border-4">
+                            <span class="text-muted small fw-bold">النسخ الاحتياطي</span>
+                            {% if user_profile.role in backup_allowed_roles %}
+                                <a href="{% url 'download_backup' %}" class="btn btn-sm btn-outline-secondary mt-1"><i class="bi bi-database-down"></i> تحميل نسخة</a>
+                            {% else %}
+                                <span class="text-muted small">غير مصرح</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- نموذج البحث المتقدم -->
+                <div class="card card-custom p-3 mb-4">
+                    <form method="get" class="row g-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label small fw-bold"><i class="bi bi-search"></i> بحث في الأرشيف</label>
+                            <input type="text" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="ابحث بالموضوع، الرقم المرجعي...">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">الحالة</label>
+                            <select name="status" class="form-select form-select-sm">
+                                <option value="">الكل</option>
+                                {% for value, label in status_choices %}
+                                    <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <button type="submit" class="btn btn-primary btn-sm px-4">تطبيق</button>
+                            <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">تفريغ الفلاتر</a>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- جدول صندوق الوارد الرئيسي -->
+                <div class="card card-custom p-4">
+                    <h5 class="fw-bold text-primary mb-3"><i class="bi bi-mailbox"></i> صندوق المراسلات والخطابات الرسمية</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>الرقم المرجعي</th>
+                                    <th>عنوان الخطاب / الموضوع</th>
+                                    <th>الاتجاه</th>
+                                    <th>النطاق</th>
+                                    <th>تاريخ الخطاب</th>
+                                    <th>الحالة</th>
+                                    <th>التحكم</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for doc in correspondences %}
+                                    <tr>
+                                        <td class="fw-bold text-secondary">{{ doc.reference_number }}</td>
+                                        <td>{{ doc.subject }}</td>
+                                        <td><span class="badge bg-secondary">{{ doc.get_direction_display }}</span></td>
+                                        <td>{{ doc.get_scope_display }}</td>
+                                        <td>{{ doc.document_date }}</td>
+                                        <td>
+                                            {% if doc.status == 'pending_hod' %}
+                                                <span class="badge bg-danger text-white">{{ doc.get_status_display }}</span>
+                                            {% elif doc.status == 'pending_dean' %}
+                                                <span class="badge bg-warning text-dark">{{ doc.get_status_display }}</span>
+                                            {% elif doc.status == 'assigned' %}
+                                                <span class="badge bg-info text-dark">{{ doc.get_status_display }}</span>
+                                            {% elif doc.status == 'archived' %}
+                                                <span class="badge bg-success">{{ doc.get_status_display }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{% url 'document_detail' doc.id %}" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> عرض وتوجيه</a>
+                                        </td>
+                                    </tr>
+                                {% empty %}
+                                    <tr>
+                                        <td colspan="7" class="text-center text-muted py-4">لا توجد مراسلات أو خطابات حالياً في صندوقك.</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
