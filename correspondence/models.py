@@ -6,17 +6,13 @@ from django.core.validators import FileExtensionValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-
-# حد أقصى لحجم ملف الخطاب المرفوع (5 ميجابايت)
 MAX_UPLOAD_SIZE_MB = 5
 
 def validate_file_size(file):
-    """يتأكد أن حجم الملف المرفوع لا يتجاوز الحد الأقصى المسموح."""
     limit_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
     if file.size > limit_bytes:
         raise ValidationError(f'حجم الملف يتجاوز الحد الأقصى المسموح ({MAX_UPLOAD_SIZE_MB} ميجابايت).')
 
-# 1. الملف الشخصي للمستخدم لتحديد الأدوار والأقسام
 class UserProfile(models.Model):
     ROLE_CHOICES = [
         ('secretary', 'سكرتير'),
@@ -43,20 +39,17 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.get_role_display()}"
 
-# إشارة تلقائية آمنة تمنع التعارض والتكرار أثناء عمليات استيراد النسخ الاحتياطية (loaddata / fixtures)
 @receiver(post_save, sender=User)
-def create_or_save_user_profile(sender, instance, created, raw=False, **kwargs):
-    if raw:
-        # حظر التنفيذ عند جلب بيانات الأرشيف من النسخة الاحتياطية لمنع الانهيار
-        return
-    
-    # استخدام get_or_create لتفادي محاولات الحفظ المكررة العشوائية
-    profile, created_now = UserProfile.objects.get_or_create(user=instance)
-    if not created_now:
-        profile.save()
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
 
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    if not hasattr(instance, 'profile'):
+        UserProfile.objects.create(user=instance)
+    instance.profile.save()
 
-# 2. الجهات الخارجية (الكليات الأخرى والإدارات المركزية)
 class ExternalEntity(models.Model):
     CAT_CHOICES = [
         ('other_faculty', 'كلية أخرى'),
@@ -72,8 +65,6 @@ class ExternalEntity(models.Model):
     def __str__(self):
         return f"{self.name} ({self.get_category_display()})"
 
-
-# عداد آمن للتزامن لتوليد الرقم المرجعي بدون تكرار عند الرفع المتزامن من أكثر من مستخدم
 class ReferenceCounter(models.Model):
     direction = models.CharField(max_length=15)
     scope = models.CharField(max_length=15)
@@ -85,8 +76,6 @@ class ReferenceCounter(models.Model):
 
     @classmethod
     def get_next_number(cls, direction, scope, year):
-        # select_for_update تقفل الصف أثناء المعاملة (transaction) لمنع
-        # حصول أكثر من طلب على نفس الرقم في نفس اللحظة
         with transaction.atomic():
             counter, _ = cls.objects.select_for_update().get_or_create(
                 direction=direction, scope=scope, year=year
@@ -95,8 +84,6 @@ class ReferenceCounter(models.Model):
             counter.save()
             return counter.last_number
 
-
-# 3. موديل الخطاب والمراسلة الأساسي
 class Correspondence(models.Model):
     DIR_CHOICES = [
         ('incoming', 'وارد'),
@@ -113,6 +100,7 @@ class Correspondence(models.Model):
     ]
     STATUS_CHOICES = [
         ('uploaded', 'مرفوع'),
+        ('pending_hod', 'قيد توصية رئيس القسم'),  # الحالة الجديدة للمسار الهرمي
         ('pending_dean', 'قيد المراجعة عند العميد/نائبه'),
         ('assigned', 'موجه'),
         ('archived', 'منفذ / مؤرشف'),
@@ -146,8 +134,6 @@ class Correspondence(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
     
     related_to = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies', verbose_name="مرتبط بخطاب سابق (رد)")
-
-    # لمستويات القفل وتفادي تعارض العميد ونائبه
     handled_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='handled_correspondences', verbose_name="تمت معالجته بواسطة")
     handled_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ المعالجة")
 
@@ -156,27 +142,26 @@ class Correspondence(models.Model):
         verbose_name_plural = "الخطابات والمراسلات"
 
     def save(self, *args, **kwargs):
-        # 1. توليد تلقائي للرقم المرجعي الفريد (آمن ضد التزامن عبر ReferenceCounter)
         if not self.reference_number:
             dir_code = 'INC' if self.direction == 'incoming' else 'OUT'
             scope_code = 'INT' if self.scope == 'internal' else ('FAC' if self.scope == 'inter_faculty' else 'ADM')
             year = datetime.date.today().year
-
             count = ReferenceCounter.get_next_number(self.direction, self.scope, year)
-
             self.reference_number = f"{dir_code}-{scope_code}-{year}-{count:05d}"
         
-        # 2. نقل التلقائي للحالة إلى قيد المراجعة عند الرفع
+        # منطق التوجيه الهرمي التلقائي:
         if self.status == 'uploaded':
-            self.status = 'pending_dean'
-            
+            # إذا كان رافع الخطاب أستاذاً بالكلية، يذهب لرئيس قسمه أولاً للتوصية
+            if hasattr(self.created_by, 'profile') and self.created_by.profile.role == 'faculty_member':
+                self.status = 'pending_hod'
+            else:
+                self.status = 'pending_dean'
+                
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.reference_number} - {self.subject}"
 
-
-# 4. التوجيهات الرقمية الخاصة بالعميد أو نائبه
 class Directive(models.Model):
     correspondence = models.ForeignKey(Correspondence, on_delete=models.CASCADE, related_name='directives', verbose_name="الخطاب المرتبط")
     issued_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_directives', verbose_name="أصدر بواسطة (العميد/النائب)")
