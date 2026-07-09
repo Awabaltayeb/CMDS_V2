@@ -1,7 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.contrib.auth import logout
 from django.contrib import messages
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -11,8 +10,8 @@ from django.http import FileResponse
 from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive
+from .backup_utils import create_backup, apply_retention_policy
 
-# الأدوار المسموح لها بالرفع (الأستاذ مسموح له الآن)
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
@@ -22,46 +21,56 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
-    # --- 1. تطبيق الخصوصية وحماية الخصوصية وقيد السرية الفائقة ---
-    # العميد والنائب يريان السري الموجه لهما ولغيرهما. الموظف الآخر لا يرى السري إلا إذا هو من أنشأه بنفسه.
-    if role in ['dean', 'vice_dean']:
+    # --- 1. تطبيق الخصوصية وقيد السرية الفائقة (العميد والمنشئ فقط للخطابات السرية) ---
+    if role == 'dean':
+        # العميد الفعلي يرى كل شيء بما في ذلك السري
         base_query = Correspondence.objects.all()
+    elif role == 'vice_dean':
+        # نائب العميد يرى كل شيء بااااااستثناء الخطابات السرية (إلا إذا هو من أنشأها بنفسه)
+        base_query = Correspondence.objects.filter(
+            Q(is_confidential=False) | Q(created_by=user)
+        )
     else:
+        # بقية الموظفين ورؤساء الأقسام: لا يرون السري إلا إذا كانوا هم من أنشأوه
+        # باستثناء حالات التوجيه الهرمي قيد المراجعة لتوصيتها (ستتم فلترتها بالأسفل للرؤية فقط دون فتح الملف)
         base_query = Correspondence.objects.filter(
             Q(is_confidential=False) | Q(created_by=user)
         )
 
-    # --- 2. مصفوفة الرؤية والفرز الهرمي بالتمام ---
+    # --- 2. مصفوفة الرؤية والفرز الهرمي بالتمام والكمال ---
     if role == 'secretary':
-        # السكرتير يرى فقط خطاباته أو ما تم توجيهه إليه بشكل خاص للتنفيذ
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
         
     elif role in ['dean', 'vice_dean']:
-        # العميد يرى كل الأرشيف باستثناء المعاملات التي لا تزال تنتظر مراجعة رئيس القسم أو المسجل العام للكلية
+        # الإدارة العليا ترى كل المعاملات الجاهزة لمراجعتها وتستبعد التي لا تزال عند رئيس القسم أو المسجل العام
         correspondences = base_query.exclude(
             status__in=['pending_hod', 'pending_g_registrar']
         ).order_by('-created_at')
         
     elif role == 'department_head':
-        # رئيس القسم يرى خطاباته + الموجه إليه + خطابات أساتذة قسمه الأكاديمي فقط لإحالتها وتوصيتها للعميد
-        correspondences = base_query.filter(
-            Q(created_by=user) |
-            Q(directives__assigned_to=user) |
-            Q(status='pending_hod', created_by__profile__department=user_profile.department)
-        ).distinct().order_by('-created_at')
+        # رئيس القسم يرى خطاباته + خطابات أساتذة قسمه (حتى لو كانت سرية لتمريرها وتوجيهها دون قراءة الـ PDF)
+        # نقوم بجلب خطابات قسمه السرية وغير السرية التي بحالة pending_hod فقط لتظهر في جدوله
+        department_professors_letters = Correspondence.objects.filter(
+            status='pending_hod', 
+            created_by__profile__department=user_profile.department
+        )
+        correspondences = (base_query.filter(
+            Q(created_by=user) | Q(directives__assigned_to=user)
+        ) | department_professors_letters).distinct().order_by('-created_at')
         
     elif role == 'general_registrar':
-        # المسجل العام للكلية يرى خطاباته + الموجه إليه + خطابات مسجل الطلاب والامتحانات قيد المراجعة لإحالتها للعميد
-        correspondences = base_query.filter(
-            Q(created_by=user) |
-            Q(directives__assigned_to=user) |
-            Q(status='pending_g_registrar', created_by__profile__role__in=['student_registrar', 'exams_registrar'])
-        ).distinct().order_by('-created_at')
+        # المسجل العام يرى خطاباته + خطابات المسجلين الآخرين قيد المراجعة لتمريرها
+        sub_registrars_letters = Correspondence.objects.filter(
+            status='pending_g_registrar',
+            created_by__profile__role__in=['student_registrar', 'exams_registrar']
+        )
+        correspondences = (base_query.filter(
+            Q(created_by=user) | Q(directives__assigned_to=user)
+        ) | sub_registrars_letters).distinct().order_by('-created_at')
         
     else:
-        # مسجل شؤون الطلاب، مسجل الامتحانات، والأستاذ يرون فقط خطاباتهم الخاصة أو الموجهة لهما خصيصاً من العميد
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
@@ -126,7 +135,6 @@ def dashboard(request):
 @login_required
 def download_backup(request):
     user_profile = request.user.profile
-    # صلاحية النسخ الاحتياطي محصورة بالعميد ونائبه فقط
     if user_profile.role not in settings.BACKUP_ALLOWED_ROLES:
         messages.error(request, 'ليست لديك صلاحية تحميل نسخة احتياطية من النظام.')
         return redirect('dashboard')
@@ -153,7 +161,7 @@ def upload_document(request):
         scope = request.POST.get('scope')
         addressed_to_type = request.POST.get('addressed_to_type')
         document_file = request.FILES.get('file')
-        is_confidential = request.POST.get('is_confidential') == 'on'  # استلام قيد السرية
+        is_confidential = request.POST.get('is_confidential') == 'on'
 
         if not all([subject, direction, scope, addressed_to_type, document_file]):
             messages.error(request, 'يرجى تعبئة جميع الحقول المطلوبة وإرفاق الملف.')
@@ -207,15 +215,18 @@ def upload_document(request):
 def document_detail(request, pk):
     user_profile = request.user.profile
     correspondence = get_object_or_404(Correspondence, pk=pk)
+    
+    # جلب التوصية والتوجهات بشكل منفصل ومحمي
     existing_directive = correspondence.directives.first()
     
-    # التحقق الأمني: إذا كان الملف سرياً، لا يراه أحد إلا منشئه والعميد/نائبه
-    if correspondence.is_confidential and user_profile.role not in ['dean', 'vice_dean'] and correspondence.created_by != request.user:
+    # 1. التحقق الأمني الفائق من السرية:
+    # يمنع نائب العميد ورئيس القسم والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ.
+    if correspondence.is_confidential and user_profile.role != 'dean' and correspondence.created_by != request.user:
         messages.error(request, 'هذا الخطاب سري للغاية وغير مصرح لك بالاطلاع عليه.')
         return redirect('dashboard')
 
     if request.method == 'POST':
-        # أ. منطق الأرشفة للموظف
+        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         if 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == request.user:
                 correspondence.status = 'archived'
@@ -225,7 +236,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد دون إحالة
+        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if user_profile.role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -237,7 +248,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ج. منطق التوصية من رئيس القسم (مسار الأستاذ الأكاديمي)
+        # ج. منطق توصية رئيس القسم (مسار الأستاذ)
         elif 'hod_endorse' in request.POST:
             if user_profile.role == 'department_head' and correspondence.status == 'pending_hod':
                 hod_note = request.POST.get('hod_note', '').strip()
@@ -258,7 +269,7 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة نص التوصية.')
 
-        # د. منطق الاعتماد من المسجل العام (مسار المسجلين الفرعيين)
+        # د. منطق اعتماد المسجل العام (مسار المسجلين الفرعيين)
         elif 'registrar_approve' in request.POST:
             if user_profile.role == 'general_registrar' and correspondence.status == 'pending_g_registrar':
                 reg_note = request.POST.get('reg_note', '').strip()
@@ -270,22 +281,22 @@ def document_detail(request, pk):
                             correspondence=correspondence,
                             issued_by=request.user,
                             assigned_to=dean_user,
-                            directive_text="[اعتماد وتوجيه المسجل العام للكلية]: " + reg_note
+                            directive_text="[اعتماد المسجل العام للكلية]: " + reg_note
                         )
                         correspondence.status = 'pending_dean'
                         correspondence.save()
-                    messages.success(request, 'تم اعتماد وتدقيق الخطاب وإحالته بنجاح للسيد العميد.')
+                    messages.success(request, 'تم تدقيق واعتماد الخطاب وإحالته بنجاح إلى السيد العميد.')
                     return redirect('dashboard')
                 else:
-                    messages.error(request, 'يرجى كتابة ملاحظة الاعتماد.')
+                    messages.error(request, 'يرجى كتابة ملاحظة الاعتماد والتدقيق.')
 
-        # هـ. منطق التوجيه الرقمي للعميد
+        # هـ. منطق التوجيه المعتاد للعميد/النائب
         else:
             if user_profile.role not in DIRECTIVE_ALLOWED_ROLES:
                 messages.error(request, 'ليست لديك صلاحية إصدار توجيه رقمي على هذه المعاملة.')
                 return redirect('dashboard')
 
-            if correspondence.handled_by or correspondence.directives.exists():
+            if correspondence.handled_by:
                 messages.error(request, 'تم التعامل مع هذه المعاملة مسبقاً.')
                 return redirect('dashboard')
             
@@ -323,15 +334,22 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
+    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
+    hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
+    reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
+    dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
+
     staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
+    
     context = {
         'correspondence': correspondence,
-        'existing_directive': existing_directive,
+        'hod_directive': hod_directive,
+        'reg_directive': reg_directive,
+        'dean_directive': dean_directive,
         'staff_users': staff_users,
         'user_profile': user_profile,
     }
     return render(request, 'correspondence/document_detail.html', context)
-
 
 def user_logout(request):
     logout(request)
