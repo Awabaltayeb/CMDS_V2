@@ -351,6 +351,7 @@ def document_detail(request, pk):
     }
     return render(request, 'correspondence/document_detail.html', context)
 
+# دالة تسجيل الخروج المباشر والآمن بالمسار المباشر الصريح لضمان التوافق
 def user_logout(request):
     logout(request)
-    return redirect('login')
+    return redirect('/accounts/login/')  # استخدام المسار المباشر لضمان الأمان وعدم حدوث أي خطأ في الروابط
