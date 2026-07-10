@@ -351,7 +351,7 @@ def document_detail(request, pk):
     }
     return render(request, 'correspondence/document_detail.html', context)
 
-# دالة تسجيل الخروج المباشر والآمن بالمسار المباشر الصريح لضمان التوافق
+# دالة الخروج السحرية لتصفير الجلسة يدوياً وتفادي قيود دجانغو 5
 def user_logout(request):
-    logout(request)
-    return redirect('/accounts/login/')  # استخدام المسار المباشر لضمان الأمان وعدم حدوث أي خطأ في الروابط
+    request.session.flush()  # تصفير وحذف الجلسة بالكامل من المتصفح وقاعدة البيانات فوراً
+    return redirect('/accounts/login/')  # إعادة التوجيه لصفحة الدخول المباشرة
