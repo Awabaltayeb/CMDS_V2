@@ -1,12 +1,10 @@
-from django.contrib import admin
-from django.urls import path, include
-from correspondence import views as correspondence_views
+from django.urls import path
+from . import views
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('accounts/', include('django.contrib.auth.urls')),  # مسارات تسجيل الدخول والخروج الافتراضية
-    path('', include('correspondence.urls')),  # مسارات تطبيق المراسلات الخاص بنا
-    
-    # حماية وتأمين ملفات الـ PDF وسد ثغرة تسريب الميديا العامة برابط مباشر!
-    path('media/correspondence_files/<str:filename>', correspondence_views.serve_protected_media, name='serve_protected_media'),
+    path('', views.dashboard, name='dashboard'),  # الرئيسية
+    path('upload/', views.upload_document, name='upload_document'),  # شاشة الرفع
+    path('document/<int:pk>/', views.document_detail, name='document_detail'),  # شاشة التفاصيل والتوجيه
+    path('backup/download/', views.download_backup, name='download_backup'),  # تحميل نسخة احتياطية فورية
+    path('logout/', views.user_logout, name='user_logout'),  # تسجيل الخروج المضمون
 ]
