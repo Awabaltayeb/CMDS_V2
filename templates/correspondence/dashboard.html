@@ -127,6 +127,7 @@
                         <div class="col-md-4">
                             <button type="submit" class="btn btn-primary btn-sm px-4">تطبيق</button>
                             <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm">تفريغ الفلاتر</a>
+                            <span class="text-muted small ms-2">{{ correspondences|length }} نتيجة</span>
                         </div>
                     </form>
                 </div>
@@ -151,13 +152,20 @@
                                 {% for doc in correspondences %}
                                     <tr>
                                         <td class="fw-bold text-secondary">{{ doc.reference_number }}</td>
-                                        <td>{{ doc.subject }}</td>
+                                        <td>
+                                            {{ doc.subject }}
+                                            {% if doc.is_confidential %}
+                                                <span class="badge bg-danger ms-1" style="font-size: 0.7rem;"><i class="bi bi-shield-lock-fill"></i> سري 🔒</span>
+                                            {% endif %}
+                                        </td>
                                         <td><span class="badge bg-secondary">{{ doc.get_direction_display }}</span></td>
                                         <td>{{ doc.get_scope_display }}</td>
                                         <td>{{ doc.document_date }}</td>
                                         <td>
                                             {% if doc.status == 'pending_hod' %}
                                                 <span class="badge bg-danger text-white">{{ doc.get_status_display }}</span>
+                                            {% elif doc.status == 'pending_g_registrar' %}
+                                                <span class="badge bg-dark text-white">{{ doc.get_status_display }}</span>
                                             {% elif doc.status == 'pending_dean' %}
                                                 <span class="badge bg-warning text-dark">{{ doc.get_status_display }}</span>
                                             {% elif doc.status == 'assigned' %}
