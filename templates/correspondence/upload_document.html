@@ -46,6 +46,25 @@
                         <input type="text" name="subject" class="form-control" id="subject" required placeholder="أدخل موضوع الخطاب بالتفصيل">
                     </div>
 
+                    <!-- اختيار طريقة الإدخال -->
+                    <div class="col-md-12 mb-3">
+                        <label class="form-label small fw-bold text-secondary">طريقة صياغة وإدخال الخطاب:</label>
+                        <div class="d-flex gap-4 p-2 bg-light rounded border">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="input_type" id="type_pdf" value="pdf" checked onchange="toggleInputType()">
+                                <label class="form-check-label small fw-bold" for="type_pdf">
+                                    <i class="bi bi-file-earmark-pdf-fill text-danger"></i> رفع ملف PDF جاهز
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="input_type" id="type_text" value="text" onchange="toggleInputType()">
+                                <label class="form-check-label small fw-bold" for="type_text">
+                                    <i class="bi bi-pencil-square text-success"></i> إنشاء خطاب نصي مباشر
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- الاتجاه -->
                     <div class="col-md-4 mb-3">
                         <label for="direction" class="form-label small fw-bold">اتجاه المعاملة</label>
@@ -74,7 +93,7 @@
                         </select>
                     </div>
 
-                    <!-- 🔒 خيار "سري للغاية" الجديد والقوي -->
+                    <!-- 🔒 خيار "سري للغاية" -->
                     <div class="col-md-12 mb-3">
                         <div class="form-check form-switch bg-light p-3 rounded border border-warning">
                             <input class="form-check-input ms-0 me-2" type="checkbox" name="is_confidential" id="is_confidential">
@@ -84,10 +103,16 @@
                         </div>
                     </div>
 
-                    <!-- ملف الخطاب PDF -->
-                    <div class="col-md-12 mb-4">
+                    <!-- أ. حقل رفع ملف الـ PDF (يُخفى عند اختيار نصي) -->
+                    <div class="col-md-12 mb-4" id="pdf_input_group">
                         <label for="file" class="form-label small fw-bold">ملف الخطاب الأصلي (PDF فقط)</label>
-                        <input type="file" name="file" class="form-control" id="file" accept=".pdf" required>
+                        <input type="file" name="file" class="form-control" id="file" accept=".pdf">
+                    </div>
+
+                    <!-- ب. حقل كتابة الخطاب النصي (يُخفى عند اختيار PDF) -->
+                    <div class="col-md-12 mb-4 d-none" id="text_input_group">
+                        <label for="body_text" class="form-label small fw-bold">نص وصياغة الخطاب الرسمي:</label>
+                        <textarea name="body_text" class="form-control" id="body_text" rows="8" placeholder="اكتب نص الخطاب الرسمي المعتمد هنا بالتفصيل..."></textarea>
                     </div>
 
                     <hr class="text-muted">
@@ -145,5 +170,29 @@
             </form>
         </div>
     </div>
+
+    <!-- كود جافاسكربت الديناميكي للتبديل السريع في الهاتف -->
+    <script>
+        function toggleInputType() {
+            var isPdf = document.getElementById('type_pdf').checked;
+            var pdfGroup = document.getElementById('pdf_input_group');
+            var textGroup = document.getElementById('text_input_group');
+            var fileInput = document.getElementById('file');
+            var textInput = document.getElementById('body_text');
+
+            if (isPdf) {
+                pdfGroup.classList.remove('d-none');
+                textGroup.classList.add('d-none');
+                fileInput.setAttribute('required', 'required');
+                textInput.removeAttribute('required');
+            } else {
+                pdfGroup.classList.add('d-none');
+                textGroup.classList.remove('d-none');
+                fileInput.removeAttribute('required');
+                textInput.setAttribute('required', 'required');
+            }
+        }
+        window.onload = toggleInputType;
+    </script>
 </body>
 </html>
