@@ -6,8 +6,6 @@ from django.core.validators import FileExtensionValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-
-# حد أقصى لحجم ملف الخطاب المرفوع (5 ميجابايت)
 MAX_UPLOAD_SIZE_MB = 5
 
 def validate_file_size(file):
@@ -16,7 +14,6 @@ def validate_file_size(file):
     if file.size > limit_bytes:
         raise ValidationError(f'حجم الملف يتجاوز الحد الأقصى المسموح ({MAX_UPLOAD_SIZE_MB} ميجابايت).')
 
-# 1. الملف الشخصي للمستخدم لتحديد الأدوار والأقسام بالتفصيل
 class UserProfile(models.Model):
     ROLE_CHOICES = [
         ('secretary', 'سكرتير'),
@@ -44,7 +41,6 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.get_role_display()}"
 
-# إشارات تلقائية لإنشاء بروفايل فور إنشاء مستخدم جديد
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
@@ -56,8 +52,6 @@ def save_user_profile(sender, instance, **kwargs):
         UserProfile.objects.create(user=instance)
     instance.profile.save()
 
-
-# 2. الجهات الخارجية (الكليات الأخرى والإدارات المركزية)
 class ExternalEntity(models.Model):
     CAT_CHOICES = [
         ('other_faculty', 'كلية أخرى'),
@@ -73,8 +67,6 @@ class ExternalEntity(models.Model):
     def __str__(self):
         return f"{self.name} ({self.get_category_display()})"
 
-
-# عداد آمن للتزامن لتوليد الرقم المرجعي بدون تكرار عند الرفع المتزامن
 class ReferenceCounter(models.Model):
     direction = models.CharField(max_length=15)
     scope = models.CharField(max_length=15)
@@ -94,8 +86,6 @@ class ReferenceCounter(models.Model):
             counter.save()
             return counter.last_number
 
-
-# 3. موديل الخطاب والمراسلة الأساسي
 class Correspondence(models.Model):
     DIR_CHOICES = [
         ('incoming', 'وارد'),
@@ -124,7 +114,7 @@ class Correspondence(models.Model):
     scope = models.CharField(max_length=15, choices=SCOPE_CHOICES, verbose_name="النطاق")
     addressed_to_type = models.CharField(max_length=10, choices=ADDRESSED_CHOICES, verbose_name="المخاطب الفعلي")
     subject = models.CharField(max_length=255, verbose_name="عنوان الخطاب / الموضوع")
-    is_confidential = models.BooleanField(default=False, verbose_name="سري للغاية")  # حقل السرية الجديد
+    is_confidential = models.BooleanField(default=False, verbose_name="سري للغاية")
     
     sender_internal = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_correspondences', verbose_name="المرسل الداخلي")
     sender_external = models.ForeignKey(ExternalEntity, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_correspondences', verbose_name="المرسل الخارجي")
@@ -139,7 +129,10 @@ class Correspondence(models.Model):
             FileExtensionValidator(allowed_extensions=['pdf']),
             validate_file_size,
         ],
+        null=True,
+        blank=True, # جعل الملف اختيارياً برمجياً للسماح بالخطابات النصية المباشرة
     )
+    body_text = models.TextField(null=True, blank=True, verbose_name="محتوى الخطاب النصي") # حقل النص الجديد
     document_date = models.DateField(default=datetime.date.today, verbose_name="تاريخ الخطاب")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name="الحالة")
     
@@ -148,8 +141,6 @@ class Correspondence(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
     
     related_to = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies', verbose_name="مرتبط بخطاب سابق (رد)")
-
-    # لمستويات القفل وتفادي تعارض العميد ونائبه
     handled_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='handled_correspondences', verbose_name="تمت معالجته بواسطة")
     handled_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ المعالجة")
 
@@ -157,37 +148,35 @@ class Correspondence(models.Model):
         verbose_name = "مراسلة / خطاب"
         verbose_name_plural = "الخطابات والمراسلات"
 
+    # التحقق من أن المستخدم إما رفع ملف أو كتب نصاً
+    def clean(self):
+        super().clean()
+        if not self.file and not self.body_text:
+            raise ValidationError('يجب إما رفع ملف PDF للخطاب أو كتابة نص الخطاب مباشرة.')
+
     def save(self, *args, **kwargs):
-        # 1. توليد تلقائي للرقم المرجعي الفريد (آمن ضد التزامن عبر ReferenceCounter)
+        self.clean() # تشغيل فحص التحقق تلقائياً قبل الحفظ
         if not self.reference_number:
             dir_code = 'INC' if self.direction == 'incoming' else 'OUT'
             scope_code = 'INT' if self.scope == 'internal' else ('FAC' if self.scope == 'inter_faculty' else 'ADM')
             year = datetime.date.today().year
-
             count = ReferenceCounter.get_next_number(self.direction, self.scope, year)
-
             self.reference_number = f"{dir_code}-{scope_code}-{year}-{count:05d}"
         
-        # 2. التوجيه التلقائي الهرمي المطور لسرية مسارات الكلية:
         if self.status == 'uploaded':
-            if hasattr(self.created_by, 'profile'):
-                role = self.created_by.profile.role
-                if role == 'faculty_member':
-                    self.status = 'pending_hod'  # يذهب أولاً لرئيس القسم
-                elif role in ['student_registrar', 'exams_registrar']:
-                    self.status = 'pending_g_registrar'  # يذهب أولاً للمسجل العام
-                else:
-                    self.status = 'pending_dean'  # يذهب للعميد مباشرة
+            role = self.created_by.profile.role
+            if role == 'faculty_member':
+                self.status = 'pending_hod'
+            elif role in ['student_registrar', 'exams_registrar']:
+                self.status = 'pending_g_registrar'
             else:
                 self.status = 'pending_dean'
-            
+                
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.reference_number} - {self.subject}"
 
-
-# 4. التوجيهات الرقمية الخاصة بالعميد أو نائبه
 class Directive(models.Model):
     correspondence = models.ForeignKey(Correspondence, on_delete=models.CASCADE, related_name='directives', verbose_name="الخطاب المرتبط")
     issued_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_directives', verbose_name="أصدر بواسطة (العميد/النائب)")
