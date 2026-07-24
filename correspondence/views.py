@@ -12,8 +12,9 @@ from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive, UserProfile
 
-# الأدوار المسموح لها بالرفع (الأستاذ مسموح له الآن)
+# الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
+# الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
 @login_required
@@ -22,6 +23,7 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
+    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -33,6 +35,7 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
+    # مصفوفة الرؤية والفرز الهرمي بالتمام والكمال
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -207,9 +210,35 @@ def upload_document(request):
 @login_required
 def document_detail(request, pk):
     user_profile = request.user.profile
-    correspondence = get_object_or_404(Correspondence, pk=pk)
+    role = user_profile.role  # تم إضافته لتعريف المتغير الناقص ومنع خطأ الـ 500
+    user = request.user       # تم إضافته لتعريف المتغير الناقص ومنع خطأ الـ 500
+    
+    # سد ثغرة IDOR: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
+    if role == 'dean':
+        allowed_queryset = Correspondence.objects.all()
+    elif role == 'vice_dean':
+        allowed_queryset = Correspondence.objects.filter(Q(is_confidential=False) | Q(created_by=user))
+    elif role == 'secretary':
+        allowed_queryset = Correspondence.objects.filter(Q(is_confidential=False) | Q(created_by=user) | Q(directives__assigned_to=user))
+    elif role == 'department_head':
+        allowed_queryset = Correspondence.objects.filter(
+            Q(created_by=user) |
+            Q(directives__assigned_to=user) |
+            Q(created_by__profile__role='faculty_member', created_by__profile__department=user_profile.department)
+        )
+    elif role == 'general_registrar':
+        allowed_queryset = Correspondence.objects.filter(
+            Q(created_by=user) |
+            Q(directives__assigned_to=user) |
+            Q(created_by__profile__role__in=['student_registrar', 'exams_registrar'])
+        )
+    else:
+        allowed_queryset = Correspondence.objects.filter(Q(created_by=user) | Q(directives__assigned_to=user))
+        
+    correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
+    # قيد السرية الفائقة: يمنع نائب العميد والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ والمسؤول المستهدف بالتنفيذ
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -217,6 +246,7 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
+        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         if 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -226,6 +256,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
+        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -237,6 +268,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
+        # ج. منطق توصية رئيس القسم (مسار الأستاذ)
         elif 'hod_endorse' in request.POST:
             if role == 'department_head' and correspondence.status == 'pending_hod':
                 hod_note = request.POST.get('hod_note', '').strip()
@@ -257,6 +289,7 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة نص التوصية.')
 
+        # د. منطق اعتماد المسجل العام (مسار المسجلين الفرعيين)
         elif 'registrar_approve' in request.POST:
             if role == 'general_registrar' and correspondence.status == 'pending_g_registrar':
                 reg_note = request.POST.get('reg_note', '').strip()
@@ -277,6 +310,7 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة ملاحظة الاعتماد والتدقيق.')
 
+        # هـ. منطق التوجيه الرقمي للعميد/النائب
         else:
             if role not in DIRECTIVE_ALLOWED_ROLES:
                 messages.error(request, 'ليست لديك صلاحية إصدار توجيه رقمي على هذه المعاملة.')
@@ -320,107 +354,5 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
-    hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
-    reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
-    dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
-
-    staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
-    
-    context = {
-        'correspondence': correspondence,
-        'hod_directive': hod_directive,
-        'reg_directive': reg_directive,
-        'dean_directive': dean_directive,
-        'staff_users': staff_users,
-        'user_profile': user_profile,
-    }
-    return render(request, 'correspondence/document_detail.html', context)
-
-
-@login_required
-def serve_protected_media(request, filename):
-    file_relative_path = f"correspondence_files/{filename}"
-    correspondence = get_object_or_404(Correspondence, file=file_relative_path)
-    
-    user_profile = request.user.profile
-    role = user_profile.role
-    user = request.user
-    
-    if correspondence.is_confidential:
-        existing_directive = correspondence.directives.first()
-        is_assigned = existing_directive and existing_directive.assigned_to == user
-        if role != 'dean' and correspondence.created_by != user and not is_assigned:
-            raise Http404("غير مصرح لك بتحميل أو فتح هذا المستند السري.")
-
-    is_authorized = False
-    if role in ['dean', 'vice_dean', 'secretary']:
-        is_authorized = True
-    elif role == 'department_head':
-        if (correspondence.created_by == user or 
-            correspondence.directives.filter(assigned_to=user).exists() or 
-            (correspondence.created_by.profile.role == 'faculty_member' and correspondence.created_by.profile.department == user_profile.department)):
-            is_authorized = True
-    elif role == 'general_registrar':
-        if (correspondence.created_by == user or 
-            correspondence.directives.filter(assigned_to=user).exists() or 
-            (correspondence.created_by.profile.role in ['student_registrar', 'exams_registrar'])):
-            is_authorized = True
-    else:
-        if correspondence.created_by == user or correspondence.directives.filter(assigned_to=user).exists():
-            is_authorized = True
-            
-    if not is_authorized:
-        raise Http404("غير مصرح لك بالاطلاع على ملف هذا الخطاب.")
-        
-    file_path = os.path.join(settings.MEDIA_ROOT, file_relative_path)
-    if os.path.exists(file_path):
-        return FileResponse(open(file_path, 'rb'), content_type='application/pdf')
-    raise Http404("المستند غير موجود على السيرفر.")
-
-
-# 4. دالة بناء البيانات والزرع التلقائي لتجاوز قيد الـ Shell المدفوع في ريندر المجاني
-def create_admin_bypass(request):
-    from .models import ExternalEntity, UserProfile
-    
-    # أ. إنشاء حساب العميد (awab) مع تفعيل بروفايل العميد تلقائياً
-    if not User.objects.filter(username='awab').exists():
-        user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'dean'
-        profile.save()
-        
-    # ب. إنشاء حساب السكرتير (secretary_user)
-    if not User.objects.filter(username='secretary_user').exists():
-        user = User.objects.create_user('secretary_user', 'sec@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'secretary'
-        profile.save()
-
-    # ج. إنشاء حساب المسجل العام للكلية (registrar_user)
-    if not User.objects.filter(username='registrar_user').exists():
-        user = User.objects.create_user('registrar_user', 'reg@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'general_registrar'
-        profile.save()
-
-    # د. إنشاء حساب الأستاذة (prof_asma)
-    if not User.objects.filter(username='prof_asma').exists():
-        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'faculty_member'
-        profile.save()
-        
-    # هـ. زرع الجهات الخارجية المعتمدة دقة في قاعدة البيانات الجديدة تلقائياً
-    ExternalEntity.objects.get_or_create(name='الشؤون العلمية بالجامعة', category='central_admin')
-    ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
-    ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
-
-    return render(request, 'registration/login.html', {
-        'form': {},  # لمنع حدوث خطأ في صفحة الـ login
-        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
-    })
-
-
-def user_logout(request):
-    logout(request)
-    return redirect('login')
+    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
+    hod_directive = correspondence.directives.fi
