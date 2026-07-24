@@ -21,6 +21,13 @@
                     <p class="text-muted small">كلية علوم الحاسوب وتقانة المعلومات</p>
                 </div>
                 
+                <!-- رسالة نجاح الزرع التلقائي السحرية في ريندر -->
+                {% if message_success %}
+                    <div class="alert alert-success small py-3" role="alert" style="font-size: 0.85rem; line-height: 1.6;">
+                        {{ message_success }}
+                    </div>
+                {% endif %}
+
                 {% if form.errors %}
                     <div class="alert alert-danger small py-2" role="alert">
                         اسم المستخدم أو كلمة المرور غير صحيحة!
