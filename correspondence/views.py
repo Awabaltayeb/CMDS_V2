@@ -355,4 +355,102 @@ def document_detail(request, pk):
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
     # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
-    hod_directive = correspondence.directives.fi
+    hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
+    reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
+    dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
+
+    staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
+    
+    context = {
+        'correspondence': correspondence,
+        'hod_directive': hod_directive,
+        'reg_directive': reg_directive,
+        'dean_directive': dean_directive,
+        'staff_users': staff_users,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/document_detail.html', context)
+
+
+@login_required
+def serve_protected_media(request, filename):
+    file_relative_path = f"correspondence_files/{filename}"
+    correspondence = get_object_or_404(Correspondence, file=file_relative_path)
+    
+    user_profile = request.user.profile
+    role = user_profile.role
+    user = request.user
+    
+    if correspondence.is_confidential:
+        existing_directive = correspondence.directives.first()
+        is_assigned = existing_directive and existing_directive.assigned_to == user
+        if role != 'dean' and correspondence.created_by != user and not is_assigned:
+            raise Http404("غير مصرح لك بتحميل أو فتح هذا المستند السري.")
+
+    is_authorized = False
+    if role in ['dean', 'vice_dean', 'secretary']:
+        is_authorized = True
+    elif role == 'department_head':
+        if (correspondence.created_by == user or 
+            correspondence.directives.filter(assigned_to=user).exists() or 
+            (correspondence.created_by.profile.role == 'faculty_member' and correspondence.created_by.profile.department == user_profile.department)):
+            is_authorized = True
+    elif role == 'general_registrar':
+        if (correspondence.created_by == user or 
+            correspondence.directives.filter(assigned_to=user).exists() or 
+            (correspondence.created_by.profile.role in ['student_registrar', 'exams_registrar'])):
+            is_authorized = True
+    else:
+        if correspondence.created_by == user or correspondence.directives.filter(assigned_to=user).exists():
+            is_authorized = True
+            
+    if not is_authorized:
+        raise Http404("غير مصرح لك بالاطلاع على ملف هذا الخطاب.")
+        
+    file_path = os.path.join(settings.MEDIA_ROOT, file_relative_path)
+    if os.path.exists(file_path):
+        return FileResponse(open(file_path, 'rb'), content_type='application/pdf')
+    raise Http404("المستند غير موجود على السيرفر.")
+
+
+# دالة زرع البيانات التلقائية وحساب العميد والجهات الخارجية
+def create_admin_bypass(request):
+    from .models import ExternalEntity, UserProfile
+    
+    if not User.objects.filter(username='awab').exists():
+        user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'dean'
+        profile.save()
+        
+    if not User.objects.filter(username='secretary_user').exists():
+        user = User.objects.create_user('secretary_user', 'sec@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'secretary'
+        profile.save()
+
+    if not User.objects.filter(username='registrar_user').exists():
+        user = User.objects.create_user('registrar_user', 'reg@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'general_registrar'
+        profile.save()
+
+    if not User.objects.filter(username='prof_asma').exists():
+        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'faculty_member'
+        profile.save()
+        
+    ExternalEntity.objects.get_or_create(name='الشؤون العلمية بالجامعة', category='central_admin')
+    ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
+    ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
+
+    return render(request, 'registration/login.html', {
+        'form': {},
+        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
+    })
+
+
+def user_logout(request):
+    logout(request)
+    return redirect('login')
