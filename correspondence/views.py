@@ -10,9 +10,9 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive
-from .backup_utils import create_backup, apply_retention_policy
+from .models import Correspondence, ExternalEntity, Directive, UserProfile
 
+# الأدوار المسموح لها بالرفع (الأستاذ مسموح له الآن)
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
@@ -66,6 +66,7 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
+    # مجلدات الأرشيف الديناميكية الذكية
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -77,6 +78,7 @@ def dashboard(request):
         elif folder == 'internal':
             correspondences = correspondences.filter(scope='internal')
 
+    # محرك البحث والفلترة
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -150,10 +152,9 @@ def upload_document(request):
         scope = request.POST.get('scope')
         addressed_to_type = request.POST.get('addressed_to_type')
         document_file = request.FILES.get('file')
-        body_text = request.POST.get('body_text')  # استلام الخطاب المكتوب
+        body_text = request.POST.get('body_text')
         is_confidential = request.POST.get('is_confidential') == 'on'
 
-        # تحقق من تعبئة العنوان والاتجاه والنطاق والمستهدف
         if not all([subject, direction, scope, addressed_to_type]):
             messages.error(request, 'يرجى تعبئة جميع الحقول المطلوبة.')
             return redirect('upload_document')
@@ -375,6 +376,49 @@ def serve_protected_media(request, filename):
     if os.path.exists(file_path):
         return FileResponse(open(file_path, 'rb'), content_type='application/pdf')
     raise Http404("المستند غير موجود على السيرفر.")
+
+
+# 4. دالة بناء البيانات والزرع التلقائي لتجاوز قيد الـ Shell المدفوع في ريندر المجاني
+def create_admin_bypass(request):
+    from .models import ExternalEntity, UserProfile
+    
+    # أ. إنشاء حساب العميد (awab) مع تفعيل بروفايل العميد تلقائياً
+    if not User.objects.filter(username='awab').exists():
+        user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'dean'
+        profile.save()
+        
+    # ب. إنشاء حساب السكرتير (secretary_user)
+    if not User.objects.filter(username='secretary_user').exists():
+        user = User.objects.create_user('secretary_user', 'sec@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'secretary'
+        profile.save()
+
+    # ج. إنشاء حساب المسجل العام للكلية (registrar_user)
+    if not User.objects.filter(username='registrar_user').exists():
+        user = User.objects.create_user('registrar_user', 'reg@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'general_registrar'
+        profile.save()
+
+    # د. إنشاء حساب الأستاذة (prof_asma)
+    if not User.objects.filter(username='prof_asma').exists():
+        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'faculty_member'
+        profile.save()
+        
+    # هـ. زرع الجهات الخارجية المعتمدة دقة في قاعدة البيانات الجديدة تلقائياً
+    ExternalEntity.objects.get_or_create(name='الشؤون العلمية بالجامعة', category='central_admin')
+    ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
+    ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
+
+    return render(request, 'registration/login.html', {
+        'form': {},  # لمنع حدوث خطأ في صفحة الـ login
+        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
+    })
 
 
 def user_logout(request):
