@@ -7,15 +7,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.db import transaction
-from django.http import FileResponse
+from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive
 from .backup_utils import create_backup, apply_retention_policy
 
-# الأدوار المسموح لها برفع خطاب جديد إلى النظام (أضفنا رئيس القسم department_head هنا)
-UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'department_head', 'faculty_member']
-# الأدوار المسموح لها بإصدار توجيه رقمي (إحالة الخطاب لموظف)
+UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
 @login_required
@@ -24,7 +22,6 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
-    # --- 1. تطبيق الخصوصية وقيد السرية الفائقة (العميد والمنشئ فقط للخطابات السرية) ---
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -36,7 +33,6 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
-    # --- 2. مصفوفة الرؤية والفرز الهرمي بالتمام والكمال ---
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -70,7 +66,6 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
-    # --- 3. مجلدات الأرشيف الديناميكية الذكية ---
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -82,7 +77,6 @@ def dashboard(request):
         elif folder == 'internal':
             correspondences = correspondences.filter(scope='internal')
 
-    # --- 4. محرك البحث والفلترة ---
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -156,9 +150,12 @@ def upload_document(request):
         scope = request.POST.get('scope')
         addressed_to_type = request.POST.get('addressed_to_type')
         document_file = request.FILES.get('file')
+        body_text = request.POST.get('body_text')  # استلام الخطاب المكتوب
+        is_confidential = request.POST.get('is_confidential') == 'on'
 
-        if not all([subject, direction, scope, addressed_to_type, document_file]):
-            messages.error(request, 'يرجى تعبئة جميع الحقول المطلوبة وإرفاق الملف.')
+        # تحقق من تعبئة العنوان والاتجاه والنطاق والمستهدف
+        if not all([subject, direction, scope, addressed_to_type]):
+            messages.error(request, 'يرجى تعبئة جميع الحقول المطلوبة.')
             return redirect('upload_document')
 
         correspondence = Correspondence(
@@ -167,6 +164,7 @@ def upload_document(request):
             scope=scope,
             addressed_to_type=addressed_to_type,
             file=document_file,
+            body_text=body_text,
             is_confidential=is_confidential,
             created_by=request.user,
             status='uploaded'
