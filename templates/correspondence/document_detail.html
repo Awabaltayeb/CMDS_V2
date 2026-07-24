@@ -5,14 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تفاصيل الخطاب - نظام CDMS</title>
     <!-- Bootstrap 5 RTL CSS -->
-    <link class="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
     <!-- Bootstrap Icons -->
-    <link class="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
         .navbar { background-color: #2b3e50 !important; }
         .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .pdf-container { height: 500px; width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+        
+        /* تصميم الترويسة والبرواز الرسمي الفخم للخطابات النصية */
+        .official-letterhead {
+            background-color: #ffffff;
+            border: 3px double #333333;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            min-height: 500px;
+            color: #333333;
+        }
+        .letterhead-header {
+            text-align: center;
+            border-bottom: 2px solid #333333;
+            padding-bottom: 15px;
+            margin-bottom: 25px;
+        }
+        .letterhead-body {
+            font-size: 1.1rem;
+            line-height: 1.8;
+            text-align: justify;
+            white-space: pre-line;
+            min-height: 250px;
+        }
     </style>
 </head>
 <body>
@@ -35,7 +59,7 @@
             {% endfor %}
         {% endif %}
         <div class="row">
-            <!-- اليمين: بيانات الخطاب والـ PDF الرئيسي -->
+            <!-- اليمين: بيانات الخطاب وعرض الـ PDF أو الترويسة الرسمية للخطاب النصي المكتوب -->
             <div class="col-lg-7 mb-4">
                 <div class="card card-custom p-4 h-100">
                     <h5 class="fw-bold text-primary mb-3">
@@ -44,7 +68,7 @@
                             <span class="badge bg-danger ms-2"><i class="bi bi-shield-lock-fill"></i> سري للغاية 🔒</span>
                         {% endif %}
                     </h5>
-                    <table class="table table-bordered small">
+                    <table class="table table-bordered small mb-4">
                         <tr>
                             <th class="table-light w-25">الرقم المرجعي</th>
                             <td class="fw-bold text-secondary">{{ correspondence.reference_number }}</td>
@@ -78,17 +102,43 @@
                         </tr>
                     </table>
 
-                    <h6 class="fw-bold text-secondary mt-3 mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> عرض ملف الخطاب الأصلي:</h6>
+                    <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> محتوى ومستند المعاملة:</h6>
                     
-                    <!-- حماية أمنية: إذا كان الملف سرياً والمستعرض ليس العميد الفعلي أو منشئ الخطاب، يُمنع تماماً من عرض الـ PDF لحفظ الخصوصية -->
+                    <!-- حماية أمنية: إذا كان الملف سرياً والمستعرض ليس العميد الفعلي أو منشئ الخطاب، يُمنع تماماً من العرض لسرية الخطاب -->
                     {% if correspondence.is_confidential and user_profile.role != 'dean' and correspondence.created_by != request.user %}
                         <div class="alert alert-warning border-0 p-4 text-center my-3 fw-bold">
                             <i class="bi bi-eye-slash-fill fs-2"></i><br>
-                            تم حجب عرض محتوى ملف الـ PDF لسرية وخصوصية الخطاب الفائقة.<br>
+                            تم حجب عرض محتوى الخطاب لسرية وخصوصية الخطاب الفائقة.<br>
                             مسموح لك فقط باتخاذ الإجراء الإداري وتمرير المعاملة للمستوى الأعلى [1].
                         </div>
                     {% else %}
-                        <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
+                        <!-- إذا كان الخطاب عبارة عن ملف PDF مرفوع -->
+                        {% if correspondence.file %}
+                            <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
+                        {% else %}
+                            <!-- 🏛️ عرض الترويسة والبراوز الرسمي الفخم للخطاب النصي المكتوب داخل السيستم -->
+                            <div class="official-letterhead">
+                                <div class="letterhead-header">
+                                    <h5 class="fw-bold mb-1">جامعة العلوم والتكنولوجيا حقتنا</h5>
+                                    <h6 class="fw-bold text-primary mb-1">كلية علوم الحاسوب وتقانة المعلومات</h6>
+                                    <span class="small text-muted">مكتب: {{ correspondence.created_by.profile.get_role_display }}</span>
+                                </div>
+                                <div class="d-flex justify-content-between small text-muted mb-4">
+                                    <span>الرقم المرجعي: <strong>{{ correspondence.reference_number }}</strong></span>
+                                    <span>التاريخ: {{ correspondence.document_date }}</span>
+                                </div>
+                                <div class="text-center my-4">
+                                    <h5 class="fw-bold text-dark"><u>الموضوع: {{ correspondence.subject }}</u></h5>
+                                </div>
+                                <div class="letterhead-body">
+                                    {{ correspondence.body_text }}
+                                </div>
+                                <div class="text-start mt-4 pe-4">
+                                    <p class="fw-bold mb-1">{{ correspondence.created_by.username }}</p>
+                                    <span class="small text-muted">{{ correspondence.created_by.profile.get_role_display }}</span>
+                                </div>
+                            </div>
+                        {% endif %}
                     {% endif %}
                 </div>
             </div>
@@ -101,8 +151,8 @@
                     <!-- أ. عرض توصية رئيس القسم السابقة إن وجدت -->
                     {% if hod_directive %}
                         <div class="alert alert-success border-0 p-3 mb-3 small">
-                            <h6 class="fw-bold text-success mb-1"><i class="bi bi-pencil-square"></i> توصية رئيس القسم:</h6>
-                            <p class="mb-1">{{ hod_directive.directive_text }}</p>
+                            <h6 class="fw-bold text-success mb-1"><i class="bi bg-success text-white px-2 py-1 rounded me-1 bi-pencil-square"></i> توصية رئيس القسم المعتمدة:</h6>
+                            <p class="mb-1 lead small">{{ hod_directive.directive_text }}</p>
                             <span class="text-muted small">بواسطة: {{ hod_directive.issued_by.username }} - بتاريخ: {{ hod_directive.created_at }}</span>
                         </div>
                     {% endif %}
@@ -110,8 +160,8 @@
                     <!-- ب. عرض اعتماد ومراجعة المسجل العام السابقة إن وجدت -->
                     {% if reg_directive %}
                         <div class="alert alert-warning border-0 p-3 mb-3 small">
-                            <h6 class="fw-bold text-dark mb-1"><i class="bi bi-pencil-square"></i> اعتماد المسجل العام للكلية:</h6>
-                            <p class="mb-1">{{ reg_directive.directive_text }}</p>
+                            <h6 class="fw-bold text-dark mb-1"><i class="bi bg-warning text-dark px-2 py-1 rounded me-1 bi-pencil-square"></i> اعتماد المسجل العام للكلية:</h6>
+                            <p class="mb-1 lead small">{{ reg_directive.directive_text }}</p>
                             <span class="text-muted small">بواسطة: {{ reg_directive.issued_by.username }} - بتاريخ: {{ reg_directive.created_at }}</span>
                         </div>
                     {% endif %}
@@ -212,4 +262,4 @@
         </div>
     </div>
 </body>
-                            </html>
+</html>
