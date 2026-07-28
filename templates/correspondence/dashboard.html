@@ -76,33 +76,33 @@
                     {% endfor %}
                 {% endif %}
 
-                <!-- بطاقات الإحصائيات العلوية -->
+                <!-- بطاقات الإحصائيات العلوية الحية والمرتبطة بقاعدة البيانات -->
                 <div class="row mb-4">
                     <div class="col-md-3">
                         <div class="card card-custom p-3 bg-white border-start border-primary border-4">
-                            <span class="text-muted small fw-bold">إجمالي المعاملات</span>
-                            <h3 class="fw-bold text-dark mt-1">{{ correspondences|length }}</h3>
+                            <span class="text-muted small fw-bold">إجمالي المراسلات</span>
+                            <h3 class="fw-bold text-dark mt-1">{{ total_count }}</h3>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="card card-custom p-3 bg-white border-start border-warning border-4">
-                            <span class="text-muted small fw-bold">معاملات معلقة</span>
-                            <h3 class="fw-bold text-warning mt-1">⏳</h3>
+                            <span class="text-muted small fw-bold">مراسلات معلقة بالصندوق</span>
+                            <h3 class="fw-bold text-warning mt-1">{{ pending_count }} ⏳</h3>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="card card-custom p-3 bg-white border-start border-success border-4">
                             <span class="text-muted small fw-bold">منفذة ومؤرشفة</span>
-                            <h3 class="fw-bold text-success mt-1">✓</h3>
+                            <h3 class="fw-bold text-success mt-1">{{ archived_count }} ✓</h3>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="card card-custom p-3 bg-white border-start border-secondary border-4">
-                            <span class="text-muted small fw-bold">النسخ الاحتياطي</span>
+                            <span class="text-muted small fw-bold">النسخ الاحتياطي للنظام</span>
                             {% if user_profile.role in backup_allowed_roles %}
                                 <a href="{% url 'download_backup' %}" class="btn btn-sm btn-outline-secondary mt-1"><i class="bi bi-database-down"></i> تحميل نسخة</a>
                             {% else %}
-                                <span class="text-muted small">غير مصرح</span>
+                                <span class="text-muted small">غير مصرح لك</span>
                             {% endif %}
                         </div>
                     </div>
