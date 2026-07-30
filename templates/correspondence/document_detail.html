@@ -14,7 +14,6 @@
         .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .pdf-container { height: 500px; width: 100%; border: 1px solid #ddd; border-radius: 8px; }
         
-        /* تصميم الترويسة والبرواز الرسمي الفخم للخطابات النصية */
         .official-letterhead {
             background-color: #ffffff;
             border: 3px double #333333;
@@ -37,6 +36,24 @@
             white-space: pre-line;
             min-height: 250px;
         }
+        
+        /* تجميل وتنسيق صندوق التعليقات */
+        .comments-box {
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        .comment-item {
+            border-bottom: 1px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+        .comment-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -58,8 +75,61 @@
                 <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2">{{ message }}</div>
             {% endfor %}
         {% endif %}
+
+        <!-- 🚀 شريط التقدم المرئي المطور لمتابعة مسار المعاملة (ميزة الفكرة 7) -->
+        <div class="card card-custom p-3 mb-4 bg-white">
+            <div class="d-flex flex-wrap justify-content-between align-items-center text-center gap-2">
+                <span class="small fw-bold text-muted"><i class="bi bi-bezier2"></i> مسار المعاملة الحركي:</span>
+                
+                <!-- خطوة 1 -->
+                <span class="badge {% if correspondence.status != 'uploaded' %}bg-success{% else %}bg-secondary{% endif %} p-2">
+                     1. رُفع <i class="bi bi-check-circle-fill"></i>
+                </span>
+                
+                <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
+
+                <!-- خطوة 2 (توصية رئيس القسم أو المسجل العام) -->
+                <span class="badge 
+                    {% if correspondence.status == 'pending_hod' or correspondence.status == 'pending_g_registrar' %}bg-warning text-dark
+                    {% elif correspondence.status in 'pending_dean,assigned,archived' %}bg-success
+                    {% else %}bg-secondary{% endif %} p-2">
+                    2. مراجعة القسم/المسجل العام 
+                    {% if correspondence.status in 'pending_dean,assigned,archived' %}<i class="bi bi-check-circle-fill"></i>{% else %}⏳{% endif %}
+                </span>
+
+                <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
+
+                <!-- line 3 (مراجعة العميد) -->
+                <span class="badge 
+                    {% if correspondence.status == 'pending_dean' %}bg-warning text-dark
+                    {% elif correspondence.status in 'assigned,archived' %}bg-success
+                    {% else %}bg-secondary{% endif %} p-2">
+                    3. مراجعة العميد 
+                    {% if correspondence.status in 'assigned,archived' %}<i class="bi bi-check-circle-fill"></i>{% else %}⏳{% endif %}
+                </span>
+
+                <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
+
+                <!-- خطوة 4 (موجه) -->
+                <span class="badge 
+                    {% if correspondence.status == 'assigned' %}bg-warning text-dark
+                    {% elif correspondence.status == 'archived' %}bg-success
+                    {% else %}bg-secondary{% endif %} p-2">
+                    4. موجه للموظف 
+                    {% if correspondence.status == 'archived' %}<i class="bi bi-check-circle-fill"></i>{% else %}⏳{% endif %}
+                </span>
+
+                <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
+
+                <!-- خطوة 5 (مؤرشف) -->
+                <span class="badge {% if correspondence.status == 'archived' %}bg-success{% else %}bg-secondary{% endif %} p-2">
+                    5. مؤرشف ومنفذ ✓
+                </span>
+            </div>
+        </div>
+
         <div class="row">
-            <!-- اليمين: بيانات الخطاب وعرض الـ PDF أو الترويسة الرسمية للخطاب النصي المكتوب -->
+            <!-- اليمين: بيانات الخطاب والـ PDF الرئيسي -->
             <div class="col-lg-7 mb-4">
                 <div class="card card-custom p-4 h-100">
                     <h5 class="fw-bold text-primary mb-3">
@@ -104,7 +174,7 @@
 
                     <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> محتوى ومستند المعاملة:</h6>
                     
-                    <!-- حماية أمنية: إذا كان الملف سرياً والمستعرض ليس العميد الفعلي أو منشئ الخطاب، يُمنع تماماً من العرض لسرية الخطاب -->
+                    <!-- حماية أمنية: إذا كان الملف سرياً والمستعرض ليس العميد الفعلي أو منشئ الخطاب، يُمنع تماماً من عرض الـ PDF لحفظ الخصوصية -->
                     {% if correspondence.is_confidential and user_profile.role != 'dean' and correspondence.created_by != request.user %}
                         <div class="alert alert-warning border-0 p-4 text-center my-3 fw-bold">
                             <i class="bi bi-eye-slash-fill fs-2"></i><br>
@@ -119,7 +189,7 @@
                             <!-- 🏛️ عرض الترويسة والبراوز الرسمي الفخم للخطاب النصي المكتوب داخل السيستم -->
                             <div class="official-letterhead">
                                 <div class="letterhead-header">
-                                    <h5 class="fw-bold mb-1">جامعة البطانة</h5>
+                                    <h5 class="fw-bold mb-1">جامعة العلوم والتكنولوجيا حقتنا</h5>
                                     <h6 class="fw-bold text-primary mb-1">كلية علوم الحاسوب وتقانة المعلومات</h6>
                                     <span class="small text-muted">مكتب: {{ correspondence.created_by.profile.get_role_display }}</span>
                                 </div>
@@ -144,8 +214,8 @@
             </div>
 
             <!-- اليسار: التوجيهات والقرارات والمسارات الهرمية المحدثة -->
-            <div class="col-lg-5 mb-4">
-                <div class="card card-custom p-4 h-100">
+            <div class="col-lg-5 mb-4 d-flex flex-column gap-3">
+                <div class="card card-custom p-4 flex-grow-1">
                     <h5 class="fw-bold text-primary mb-4"><i class="bi bi-shield-check"></i> التوجيهات والقرارات الرقمية</h5>
 
                     <!-- أ. عرض توصية رئيس القسم السابقة إن وجدت -->
@@ -197,7 +267,7 @@
 
                     <!-- هـ. النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
                     
-                    <!-- 1. نموذج رئيس القسم (الحالة:pending_hod والدور:department_head) -->
+                    <!-- 1. نموذج رئيس القسم -->
                     {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
                         <form method="post" class="mt-3">
                             {% csrf_token %}
@@ -208,7 +278,7 @@
                             <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
                         </form>
 
-                    <!-- 2. نموذج المسجل العام (الحالة:pending_g_registrar والدور:general_registrar) -->
+                    <!-- 2. نموذج المسجل العام -->
                     {% elif correspondence.status == 'pending_g_registrar' and user_profile.role == 'general_registrar' %}
                         <form method="post" class="mt-3">
                             {% csrf_token %}
@@ -219,7 +289,7 @@
                             <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
                         </form>
 
-                    <!-- 3. نموذج العميد المعتاد المطور (الحالة:pending_dean والدور:عميد أو نائب عميد) -->
+                    <!-- 3. نموذج العميد المعتاد المطور -->
                     {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
                         <form method="post" class="mt-3">
                             {% csrf_token %}
@@ -243,7 +313,7 @@
 
                         <hr class="my-4 text-muted">
                         
-                        <!-- زر الأرشفة الفورية المباشرة للعميد دون إحالة لأي موظف (متاح دائماً للعميد في حالة pending_dean) -->
+                        <!-- زر الأرشفة الفورية المباشرة للعميد -->
                         <form method="post" action="">
                             {% csrf_token %}
                             <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
@@ -257,6 +327,35 @@
                             </div>
                         {% endif %}
                     {% endif %}
+                </div>
+
+                <!-- 💬 ميزة الفكرة 6: صندوق النقاش والتنسيق السري الداخلي للخطاب -->
+                <div class="card card-custom p-4">
+                    <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-chat-dots-fill text-primary"></i> نقاش وتنسيق داخلي سري</h5>
+                    
+                    <!-- عرض التعليقات السابقة -->
+                    <div class="comments-box mb-3">
+                        {% for comment in comments %}
+                            <div class="comment-item mb-2 pb-2">
+                                <div class="d-flex justify-content-between small fw-bold text-muted mb-1">
+                                    <span><i class="bi bi-person-circle"></i> {{ comment.author.username }} ({{ comment.author.profile.get_role_display }})</span>
+                                    <span style="font-size: 0.75rem;">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
+                                </div>
+                                <p class="mb-0 small text-dark ps-3">{{ comment.text }}</p>
+                            </div>
+                        {% empty %}
+                            <p class="text-muted small text-center my-3"><i class="bi bi-chat-left-dots"></i> لا توجد نقاشات داخلية على هذا الخطاب بعد.</p>
+                        {% endfor %}
+                    </div>
+
+                    <!-- نموذج إضافة تعليق جديد سريع -->
+                    <form method="post" action="">
+                        {% csrf_token %}
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="comment_text" class="form-control" placeholder="اكتب ملاحظة أو استفساراً داخلياً للزملاء..." required>
+                            <button type="submit" name="add_comment" class="btn btn-secondary">إرسال</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
