@@ -9,7 +9,6 @@ from django.dispatch import receiver
 MAX_UPLOAD_SIZE_MB = 5
 
 def validate_file_size(file):
-    """يتأكد أن حجم الملف المرفوع لا يتجاوز الحد الأقصى المسموح."""
     limit_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
     if file.size > limit_bytes:
         raise ValidationError(f'حجم الملف يتجاوز الحد الأقصى المسموح ({MAX_UPLOAD_SIZE_MB} ميجابايت).')
@@ -130,9 +129,9 @@ class Correspondence(models.Model):
             validate_file_size,
         ],
         null=True,
-        blank=True, # جعل الملف اختيارياً برمجياً للسماح بالخطابات النصية المباشرة
+        blank=True,
     )
-    body_text = models.TextField(null=True, blank=True, verbose_name="محتوى الخطاب النصي") # حقل النص الجديد
+    body_text = models.TextField(null=True, blank=True, verbose_name="محتوى الخطاب النصي")
     document_date = models.DateField(default=datetime.date.today, verbose_name="تاريخ الخطاب")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name="الحالة")
     
@@ -148,14 +147,13 @@ class Correspondence(models.Model):
         verbose_name = "مراسلة / خطاب"
         verbose_name_plural = "الخطابات والمراسلات"
 
-    # التحقق من أن المستخدم إما رفع ملف أو كتب نصاً
     def clean(self):
         super().clean()
         if not self.file and not self.body_text:
             raise ValidationError('يجب إما رفع ملف PDF للخطاب أو كتابة نص الخطاب مباشرة.')
 
     def save(self, *args, **kwargs):
-        self.clean() # تشغيل فحص التحقق تلقائياً قبل الحفظ
+        self.clean()
         if not self.reference_number:
             dir_code = 'INC' if self.direction == 'incoming' else 'OUT'
             scope_code = 'INT' if self.scope == 'internal' else ('FAC' if self.scope == 'inter_faculty' else 'ADM')
@@ -193,3 +191,17 @@ class Directive(models.Model):
 
     def __str__(self):
         return f"توجيه على {self.correspondence.reference_number} إلى {self.assigned_to.username}"
+
+# 5. جدول التعليقات والنقاش الداخلي السري المضاف حديثاً (ميزة الفكرة 6)
+class Comment(models.Model):
+    correspondence = models.ForeignKey(Correspondence, on_delete=models.CASCADE, related_name='comments', verbose_name="الخطاب المرتبط")
+    author = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="الكاتب")
+    text = models.TextField(verbose_name="نص التعليق")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التعليق")
+
+    class Meta:
+        verbose_name = "تعليق داخلي"
+        verbose_name_plural = "التعليقات الداخلية"
+
+    def __str__(self):
+        return f"تعليق من {self.author.username} على {self.correspondence.reference_number}"
