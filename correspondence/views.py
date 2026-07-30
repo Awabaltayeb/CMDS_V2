@@ -10,7 +10,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive, Comment
+from .models import Correspondence, ExternalEntity, Directive, UserProfile, Comment
 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
