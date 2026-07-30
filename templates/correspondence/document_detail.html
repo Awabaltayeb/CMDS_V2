@@ -37,7 +37,6 @@
             min-height: 250px;
         }
         
-        /* تجميل وتنسيق صندوق التعليقات */
         .comments-box {
             max-height: 250px;
             overflow-y: auto;
@@ -76,7 +75,7 @@
             {% endfor %}
         {% endif %}
 
-        <!-- 🚀 شريط التقدم المرئي المطور لمتابعة مسار المعاملة (ميزة الفكرة 7) -->
+        <!-- شريط التقدم المرئي المطور لمتابعة مسار المعاملة -->
         <div class="card card-custom p-3 mb-4 bg-white">
             <div class="d-flex flex-wrap justify-content-between align-items-center text-center gap-2">
                 <span class="small fw-bold text-muted"><i class="bi bi-bezier2"></i> مسار المعاملة الحركي:</span>
@@ -99,7 +98,7 @@
 
                 <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
 
-                <!-- line 3 (مراجعة العميد) -->
+                <!-- خطوة 3 (مراجعة العميد) -->
                 <span class="badge 
                     {% if correspondence.status == 'pending_dean' %}bg-warning text-dark
                     {% elif correspondence.status in 'assigned,archived' %}bg-success
@@ -186,7 +185,7 @@
                         {% if correspondence.file %}
                             <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
                         {% else %}
-                            <!-- 🏛️ عرض الترويسة والبراوز الرسمي الفخم للخطاب النصي المكتوب داخل السيستم -->
+                            <!-- عرض الترويسة والبراوز الرسمي الفخم للخطاب النصي المكتوب داخل السيستم -->
                             <div class="official-letterhead">
                                 <div class="letterhead-header">
                                     <h5 class="fw-bold mb-1">جامعة العلوم والتكنولوجيا حقتنا</h5>
@@ -266,99 +265,60 @@
                     {% endif %}
 
                     <!-- هـ. النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
-                    
-                    <!-- 1. نموذج رئيس القسم -->
-                    {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
-                        <form method="post" class="mt-3">
-                            {% csrf_token %}
-                            <div class="mb-3">
-                                <label for="hod_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> توصية وإفادة رئيس القسم الموجهة للعميد:</label>
-                                <textarea name="hod_note" class="form-control" id="hod_note" rows="5" required placeholder="يرجى كتابة توصيتك الإدارية على خطاب الأستاذ هنا..."></textarea>
-                            </div>
-                            <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
-                        </form>
-
-                    <!-- 2. نموذج المسجل العام -->
-                    {% elif correspondence.status == 'pending_g_registrar' and user_profile.role == 'general_registrar' %}
-                        <form method="post" class="mt-3">
-                            {% csrf_token %}
-                            <div class="mb-3">
-                                <label for="reg_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> تدقيق واعتماد المسجل العام الموجه للعميد:</label>
-                                <textarea name="reg_note" class="form-control" id="reg_note" rows="5" required placeholder="يرجى كتابة ملاحظة الاعتماد على خطاب المسجل الفرعي هنا..."></textarea>
-                            </div>
-                            <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
-                        </form>
-
-                    <!-- 3. نموذج العميد المعتاد المطور -->
-                    {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
-                        <form method="post" class="mt-3">
-                            {% csrf_token %}
-                            <div class="mb-3">
-                                <label for="assigned_to" class="form-label small fw-bold"><i class="bi bi-person-fill-gear"></i> توجيه وإحالة المعاملة إلى الموظف المختص:</label>
-                                <select name="assigned_to" class="form-select" id="assigned_to" required>
-                                    <option value="">-- اختر الموظف المستهدف --</option>
-                                    {% for staff in staff_users %}
-                                        <option value="{{ staff.id }}">{{ staff.username }} ({{ staff.profile.get_role_display }})</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="directive_text" class="form-label small fw-bold"><i class="bi bi-chat-text-fill"></i> نص التوجيه الرقمي (الأمر الإداري):</label>
-                                <textarea name="directive_text" class="form-control" id="directive_text" rows="6" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
-                            </div>
-
-                            <button type="submit" class="btn btn-primary w-100 py-2 fw-bold"><i class="bi bi-send-fill"></i> اعتماد التوجيه وإرسال المعاملة</button>
-                        </form>
-
-                        <hr class="my-4 text-muted">
-                        
-                        <!-- زر الأرشفة الفورية المباشرة للعميد -->
-                        <form method="post" action="">
-                            {% csrf_token %}
-                            <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
-                        </form>
-
-                    <!-- 4. في حالة عدم وجود إجراء بعد ولست صاحب الصلاحية الحالية -->
-                    {% else %}
-                        {% if correspondence.status != 'archived' and correspondence.status != 'assigned' %}
-                            <div class="text-center py-5">
-                                <p class="text-muted"><i class="bi bi-hourglass-split"></i> بانتظار اتخاذ الإجراء الإداري الهرمي المناسب على هذه المعاملة.</p>
-                            </div>
-                        {% endif %}
-                    {% endif %}
-                </div>
-
-                <!-- 💬 ميزة الفكرة 6: صندوق النقاش والتنسيق السري الداخلي للخطاب -->
-                <div class="card card-custom p-4">
-                    <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-chat-dots-fill text-primary"></i> نقاش وتنسيق داخلي سري</h5>
-                    
-                    <!-- عرض التعليقات السابقة -->
-                    <div class="comments-box mb-3">
-                        {% for comment in comments %}
-                            <div class="comment-item mb-2 pb-2">
-                                <div class="d-flex justify-content-between small fw-bold text-muted mb-1">
-                                    <span><i class="bi bi-person-circle"></i> {{ comment.author.username }} ({{ comment.author.profile.get_role_display }})</span>
-                                    <span style="font-size: 0.75rem;">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
+                    {% if not existing_directive %}
+                        <!-- 1. نموذج رئيس القسم -->
+                        {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
+                            <form method="post" class="mt-3">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="hod_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> توصية وإفادة رئيس القسم الموجهة للعميد:</label>
+                                    <textarea name="hod_note" class="form-control" id="hod_note" rows="5" required placeholder="يرجى كتابة توصيتك الإدارية على خطاب الأستاذ هنا..."></textarea>
                                 </div>
-                                <p class="mb-0 small text-dark ps-3">{{ comment.text }}</p>
-                            </div>
-                        {% empty %}
-                            <p class="text-muted small text-center my-3"><i class="bi bi-chat-left-dots"></i> لا توجد نقاشات داخلية على هذا الخطاب بعد.</p>
-                        {% endfor %}
-                    </div>
+                                <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
+                            </form>
 
-                    <!-- نموذج إضافة تعليق جديد سريع -->
-                    <form method="post" action="">
-                        {% csrf_token %}
-                        <div class="input-group input-group-sm">
-                            <input type="text" name="comment_text" class="form-control" placeholder="اكتب ملاحظة أو استفساراً داخلياً للزملاء..." required>
-                            <button type="submit" name="add_comment" class="btn btn-secondary">إرسال</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
+                        <!-- 2. نموذج المسجل العام -->
+                        {% elif correspondence.status == 'pending_g_registrar' and user_profile.role == 'general_registrar' %}
+                            <form method="post" class="mt-3">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="reg_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> تدقيق واعتماد المسجل العام الموجه للعميد:</label>
+                                    <textarea name="reg_note" class="form-control" id="reg_note" rows="5" required placeholder="يرجى كتابة ملاحظة الاعتماد على خطاب المسجل الفرعي هنا..."></textarea>
+                                </div>
+                                <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
+                            </form>
+
+                        <!-- 3. نموذج العميد المعتاد المطور -->
+                        {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
+                            <form method="post" class="mt-3">
+                                {% csrf_token %}
+                                <div class="mb-3">
+                                    <label for="assigned_to" class="form-label small fw-bold"><i class="bi bi-person-fill-gear"></i> توجيه وإحالة المعاملة إلى الموظف المختص:</label>
+                                    <select name="assigned_to" class="form-select" id="assigned_to" required>
+                                        <option value="">-- اختر الموظف المستهدف --</option>
+                                        {% for staff in staff_users %}
+                                            <option value="{{ staff.id }}">{{ staff.username }} ({{ staff.profile.get_role_display }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="directive_text" class="form-label small fw-bold"><i class="bi bi-chat-text-fill"></i> نص التوجيه الرقمي (الأمر الإداري):</label>
+                                    <textarea name="directive_text" class="form-control" id="directive_text" rows="6" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold"><i class="bi bi-send-fill"></i> اعتماد التوجيه وإرسال المعاملة</button>
+                            </form>
+
+                            <hr class="my-4 text-muted">
+                            
+                            <!-- زر الأرشفة الفورية المباشرة للعميد -->
+                            <form method="post" action="">
+                                {% csrf_token %}
+                                <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
+                            </form>
+
+                        <!-- 4. في حالة عدم وجود إجراء بعد ولست صاحب الصلاحية الحالية -->
+                        {% else %}
+                            {% if correspondence.status != 'archived' and correspondence.status != 'assigned' %}
+                                <div class="text-center py-5">
