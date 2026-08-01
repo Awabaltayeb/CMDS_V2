@@ -10,7 +10,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive, UserProfile, Comment
+from .models import Correspondence, ExternalEntity, Directive, Comment
 
 # الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
@@ -254,6 +254,7 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
+        # ميزة الفكرة 6: استقبال وحفظ التعليق الداخلي السري للموظفين والعميد
         if 'add_comment' in request.POST:
             comment_text = request.POST.get('comment_text', '').strip()
             if comment_text:
@@ -368,10 +369,11 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
-    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
+    
+    # جلب التعليقات الداخلية المخصصة للنقاش
     comments = correspondence.comments.all().order_by('created_at')
 
     staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
@@ -381,7 +383,7 @@ def document_detail(request, pk):
         'hod_directive': hod_directive,
         'reg_directive': reg_directive,
         'dean_directive': dean_directive,
-        'comments': comments,
+        'comments': comments,  # تمرير صندوق التعليقات للواجهة
         'staff_users': staff_users,
         'user_profile': user_profile,
     }
@@ -429,33 +431,10 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
+# دالة زرع البيانات وتجهيز الحسابات
 def create_admin_bypass(request):
-    from .models import ExternalEntity, UserProfile, Comment
-    from django.db import connection
+    from .models import ExternalEntity, UserProfile
     
-    # ⚙️ حيلة سحرية مخصصة لـ PostgreSQL للتحقق من وجود الجدول بأمان ودون إحباط المعاملة!
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'correspondence_comment'
-                );
-            """)
-            table_exists = cursor.fetchone()[0]
-    except Exception:
-        table_exists = False
-
-    # إذا كان الجدول مفقوداً، نقوم بإنشائه فوراً وبأمان تّام
-    if not table_exists:
-        try:
-            with connection.schema_editor() as schema_editor:
-                schema_editor.create_model(Comment)
-        except Exception:
-            pass
-
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -486,7 +465,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات وتجهيز حسابات الكلية والجهات الخارجية! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
+        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
     })
 
 
