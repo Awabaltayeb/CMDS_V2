@@ -10,7 +10,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive, Comment
+from .models import Correspondence, ExternalEntity, Directive, UserProfile, Comment
 
 # الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
@@ -23,7 +23,7 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
-    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
+    # تطبيق السرية الفائقة
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -107,7 +107,6 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
-    # حساب الإحصائيات الحية والديناميكية بناءً على صندوق الموظف الحالي
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
@@ -221,7 +220,6 @@ def document_detail(request, pk):
     role = user_profile.role
     user = request.user
     
-    # سد ثغرة IDOR: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -246,7 +244,6 @@ def document_detail(request, pk):
     correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
-    # قيد السرية الفائقة: يمنع نائب العميد والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ والمسؤول المستهدف بالتنفيذ
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -254,7 +251,6 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
-        # ميزة الفكرة 6: استقبال وحفظ التعليق الداخلي السري للموظفين والعميد
         if 'add_comment' in request.POST:
             comment_text = request.POST.get('comment_text', '').strip()
             if comment_text:
@@ -372,8 +368,6 @@ def document_detail(request, pk):
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
-    
-    # جلب التعليقات الداخلية المخصصة للنقاش
     comments = correspondence.comments.all().order_by('created_at')
 
     staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
@@ -383,7 +377,7 @@ def document_detail(request, pk):
         'hod_directive': hod_directive,
         'reg_directive': reg_directive,
         'dean_directive': dean_directive,
-        'comments': comments,  # تمرير صندوق التعليقات للواجهة
+        'comments': comments,
         'staff_users': staff_users,
         'user_profile': user_profile,
     }
@@ -431,10 +425,32 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# دالة زرع البيانات وتجهيز الحسابات
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً بأمر SQL مباشر ومحمي لـ PostgreSQL
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile
+    from django.db import connection
     
+    # ⚙️ الحيلة الذكية الفعالة لـ PostgreSQL لإنشاء جدول التعليقات يدوياً وبشكل صريح ومؤمن
+    try:
+        with connection.cursor() as cursor:
+            # 1. إنشاء الجدول يدوياً بخصائصه ومفاتيحه الخارجية
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS correspondence_comment (
+                    id SERIAL PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+                    correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
+                );
+            """)
+            # 2. إنشاء الفهارس (Indexes) لتسريع الأداء ومنع أي تعارض
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
+            table_success = True
+    except Exception as e:
+        table_success = False
+        error_msg = str(e)
+
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -463,9 +479,14 @@ def create_admin_bypass(request):
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
     ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
 
+    if table_success:
+        message = '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات (بالـ SQL الصريح) وتجهيز حسابات الكلية! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
+    else:
+        message = f'⚠️ تم تجهيز الحسابات ولكن فشل إنشاء جدول التعليقات يدوياً: {error_msg}'
+
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
+        'message_success': message
     })
 
 
