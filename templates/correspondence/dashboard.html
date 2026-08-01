@@ -14,6 +14,23 @@
         .sidebar .nav-link { color: #cfd8dc; transition: 0.2s; }
         .sidebar .nav-link:hover, .sidebar .nav-link.active { color: white; background-color: #34495e; border-radius: 4px; }
         .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        
+        /* تجميل وتنسيق جرس التنبيهات */
+        .notification-dropdown {
+            min-width: 320px;
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .notification-item {
+            font-size: 0.85rem;
+            border-bottom: 1px solid #f0f0f0;
+            transition: 0.2s;
+        }
+        .notification-item:hover {
+            background-color: #f8f9fa;
+        }
     </style>
 </head>
 <body>
@@ -69,6 +86,43 @@
 
             <!-- المحتوى الرئيسي للوحة المعلومات (Dashboard Main Content) -->
             <div class="col-md-9 col-lg-10 p-4">
+                
+                <!-- شريط الملاحة العلوي المطور والمحتوي على جرس التنبيهات الذكي (ميزة الفكرة 2) -->
+                <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+                    <h4 class="fw-bold text-dark"><i class="bi bi-display-fill text-primary"></i> لوحة الإحصائيات والمعلومات</h4>
+                    
+                    <!-- 🔔 جرس التنبيهات التفاعلي والمنسق -->
+                    <div class="dropdown me-3">
+                        <button class="btn btn-light position-relative p-2" type="button" id="notifDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="border-radius: 50%;">
+                            <i class="bi bi-bell-fill fs-5 text-secondary"></i>
+                            {% if unread_notifications_count > 0 %}
+                                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: 0.65rem;">
+                                    {{ unread_notifications_count }}
+                                </span>
+                            {% endif %}
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end notification-dropdown p-0" aria-labelledby="notifDropdown">
+                            <li class="bg-primary text-white p-3 rounded-top">
+                                <h6 class="fw-bold mb-0"><i class="bi bi-bell"></i> التنبيهات غير المقروءة ({{ unread_notifications_count }})</h6>
+                            </li>
+                            {% for notif in active_notifications %}
+                                <li>
+                                    <!-- عند الضغط على التنبيه يتم تعليمه كمقروء برمجياً ويحوله طوالييي لصفحة تفاصيل المعاملة -->
+                                    <a class="dropdown-item notification-item p-3 text-wrap text-dark" href="{% url 'mark_notification_read' notif.id %}">
+                                        {{ notif.text }}<br>
+                                        <span class="text-muted" style="font-size: 0.7rem;">{{ notif.created_at|date:"Y-m-d H:i" }}</span>
+                                    </a>
+                                </li>
+                            {% empty %}
+                                <li class="p-4 text-center text-muted small">
+                                    <i class="bi bi-bell-slash fs-3 d-block mb-2 text-secondary"></i>
+                                    لا توجد تنبيهات جديدة في صندوقك حالياً.
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+
                 <!-- رسائل النظام -->
                 {% if messages %}
                     {% for message in messages %}
@@ -76,7 +130,7 @@
                     {% endfor %}
                 {% endif %}
 
-                <!-- بطاقات الإحصائيات العلوية الحية والمرتبطة بقاعدة البيانات -->
+                <!-- بطاقات الإحصائيات العلوية الحية -->
                 <div class="row mb-4">
                     <div class="col-md-3">
                         <div class="card card-custom p-3 bg-white border-start border-primary border-4">
@@ -170,6 +224,8 @@
                                                 <span class="badge bg-warning text-dark">{{ doc.get_status_display }}</span>
                                             {% elif doc.status == 'assigned' %}
                                                 <span class="badge bg-info text-dark">{{ doc.get_status_display }}</span>
+                                            {% elif doc.status == 'returned' %}
+                                                <span class="badge bg-danger text-white"><i class="bi bi-exclamation-triangle-fill"></i> {{ doc.get_status_display }}</span>
                                             {% elif doc.status == 'archived' %}
                                                 <span class="badge bg-success">{{ doc.get_status_display }}</span>
                                             {% endif %}
@@ -190,5 +246,10 @@
             </div>
         </div>
     </div>
+    
+    <!-- Bootstrap JS (مطلوب لفتح وتشغيل قائمة الإشعارات المنسدلة "Dropdown") -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/auto/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.min.js"></script>
 </body>
 </html>
