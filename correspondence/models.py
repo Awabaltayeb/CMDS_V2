@@ -105,6 +105,7 @@ class Correspondence(models.Model):
         ('pending_g_registrar', 'قيد مراجعة المسجل العام'),
         ('pending_dean', 'قيد المراجعة عند العميد/نائبه'),
         ('assigned', 'موجه'),
+        ('returned', 'مرتجع لتصحيح البيانات'), # الحالة الجديدة لميزة الارتجاع
         ('archived', 'منفذ / مؤرشف'),
     ]
 
@@ -134,6 +135,7 @@ class Correspondence(models.Model):
     body_text = models.TextField(null=True, blank=True, verbose_name="محتوى الخطاب النصي")
     document_date = models.DateField(default=datetime.date.today, verbose_name="تاريخ الخطاب")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name="الحالة")
+    return_reason = models.TextField(null=True, blank=True, verbose_name="سبب الإرجاع لتصحيح البيانات") # حقل الارتجاع الجديد
     
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_correspondences', verbose_name="أنشئ بواسطة")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء في النظام")
@@ -192,7 +194,6 @@ class Directive(models.Model):
     def __str__(self):
         return f"توجيه على {self.correspondence.reference_number} إلى {self.assigned_to.username}"
 
-# 5. جدول التعليقات والنقاش الداخلي السري المضاف حديثاً (ميزة الفكرة 6)
 class Comment(models.Model):
     correspondence = models.ForeignKey(Correspondence, on_delete=models.CASCADE, related_name='comments', verbose_name="الخطاب المرتبط")
     author = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="الكاتب")
@@ -205,3 +206,18 @@ class Comment(models.Model):
 
     def __str__(self):
         return f"تعليق من {self.author.username} على {self.correspondence.reference_number}"
+
+# 6. جدول الإشعارات داخل النظام المضاف حديثاً (ميزة الفكرة 2)
+class Notification(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="المستلم")
+    text = models.TextField(verbose_name="نص الإشعار")
+    correspondence = models.ForeignKey(Correspondence, on_delete=models.CASCADE, related_name='notifications', verbose_name="المعاملة المرتبطة")
+    is_read = models.BooleanField(default=False, verbose_name="هل قُرِئ؟")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإشعار")
+
+    class Meta:
+        verbose_name = "إشعار داخل النظام"
+        verbose_name_plural = "الإشعارات داخل النظام"
+
+    def __str__(self):
+        return f"إشعار لـ {self.recipient.username}: {self.text[:30]}"
