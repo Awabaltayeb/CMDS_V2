@@ -169,7 +169,7 @@ X_FRAME_OPTIONS = 'SAMEORIGIN'
 # إعدادات الأمان الخاصة بـ HTTPS/الكوكيز الآمنة تُفعَّل فقط عندما DEBUG=False
 # (أي وقت النشر الفعلي على سيرفر بشهادة SSL). تفعيلها أثناء DEBUG=True يكسر
 # تسجيل الدخول محلياً لأن المتصفح لا يرسل الكوكيز على رابط http عادي.
-SECURE_SSL_REDIRECT = not DEBUG
+SECURE_SSL_REDIRECT = False  # تم إيقافه لأن سيرفر ريندر يقوم بتحويل الـ HTTPS تلقائياً للزوار
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 
