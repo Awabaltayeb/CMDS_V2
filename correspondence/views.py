@@ -12,9 +12,12 @@ from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
 
+# الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
+# الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
+# 1. لوحة التحكم الرئيسية مع البحث والفلترة
 @login_required
 def dashboard(request):
     user_profile = request.user.profile
@@ -132,12 +135,13 @@ def dashboard(request):
         'total_count': total_count,
         'pending_count': pending_count,
         'archived_count': archived_count,
-        'active_notifications': active_notifications,  # تمرير الإشعارات للجرس
+        'active_notifications': active_notifications,
         'unread_notifications_count': unread_notifications_count,
     }
     return render(request, 'correspondence/dashboard.html', context)
 
 
+# 1-ب. تحميل نسخة احتياطية فورية (للعميد والنائب فقط)
 @login_required
 def download_backup(request):
     user_profile = request.user.profile
@@ -154,6 +158,7 @@ def download_backup(request):
     )
 
 
+# 2. واجهة رفع الخطابات الرسمية
 @login_required
 def upload_document(request):
     user_profile = request.user.profile
@@ -212,15 +217,12 @@ def upload_document(request):
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
-                # يرسل إشعار لرئيس القسم التابع له
                 notify_user = User.objects.filter(profile__role='department_head', profile__department=user_profile.department).first()
                 text_msg = f"📥 قام الأستاذ {request.user.username} برفع معاملة جديدة بانتظار توصيتك: '{correspondence.subject}'."
             elif role in ['student_registrar', 'exams_registrar']:
-                # يرسل إشعار للمسجل العام للكلية
                 notify_user = User.objects.filter(profile__role='general_registrar').first()
                 text_msg = f"📥 قام مسجل الفرع {request.user.username} برفع خطاب جديد بانتظار اعتمادك: '{correspondence.subject}'."
             else:
-                # يرسل إشعار مباشر لمكتب السيد العميد
                 notify_user = User.objects.filter(profile__role='dean').first()
                 text_msg = f"📥 تم رفع خطاب جديد بانتظار مراجعتكم: '{correspondence.subject}'."
             
@@ -240,13 +242,14 @@ def upload_document(request):
     return render(request, 'correspondence/upload_document.html', context)
 
 
+# 3. واجهة عرض التفاصيل والتوجيه الرقمي والأرشفة (سد ثغرة IDOR)
 @login_required
 def document_detail(request, pk):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # سد ثغرة IDOR
+    # سد ثغرة IDور: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -291,7 +294,7 @@ def document_detail(request, pk):
                 messages.success(request, 'تم إضافة التعليق والتنسيق الداخلي بنجاح.')
             return redirect('document_detail', pk=pk)
 
-        # أ. منطق أرشفة الموظف
+        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         elif 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -301,7 +304,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد دون إحالة
+        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -466,6 +469,54 @@ def document_detail(request, pk):
     return render(request, 'correspondence/document_detail.html', context)
 
 
+# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع (ميزة الفكرة 3 الجديدة وحل الـ AttributeError)
+@login_required
+def edit_document(request, pk):
+    user_profile = request.user.profile
+    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
+    
+    if request.method == 'POST':
+        subject = request.POST.get('subject')
+        direction = request.POST.get('direction')
+        scope = request.POST.get('scope')
+        addressed_to_type = request.POST.get('addressed_to_type')
+        
+        # تحديث البيانات الأساسية
+        correspondence.subject = subject
+        correspondence.direction = direction
+        correspondence.scope = scope
+        correspondence.addressed_to_type = addressed_to_type
+        
+        # تحديث الملف إذا تم رفع ملف جديد
+        new_file = request.FILES.get('file')
+        if new_file:
+            correspondence.file = new_file
+            
+        # تحديث النص إذا تم كتابة نص جديد
+        body_text = request.POST.get('body_text')
+        if body_text:
+            correspondence.body_text = body_text
+            
+        # إعادة صياغة الخطاب تصفّر حالة الارتجاع والسبب وترجعه للمسار الهرمي التلقائي
+        correspondence.status = 'uploaded'
+        correspondence.return_reason = None
+        correspondence.save()
+        
+        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
+        return redirect('dashboard')
+        
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    
+    context = {
+        'correspondence': correspondence,
+        'users': users,
+        'external_entities': external_entities,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/edit_document.html', context)
+
+
 @login_required
 def serve_protected_media(request, filename):
     file_relative_path = f"correspondence_files/{filename}"
@@ -516,12 +567,12 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
     
-    # حيلة ذكية وآمنة لإنشاء الجداول الجديدة يدوياً لمنع تضارب الـ migrations على ريندر
+    # ⚙️ حيلة ذكية وآمنة لإنشاء الجداول الجديدة يدوياً لمنع تضارب الـ migrations على ريندر
     try:
         with connection.cursor() as cursor:
             # 1. إنشاء جدول التعليقات
