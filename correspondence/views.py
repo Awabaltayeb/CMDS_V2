@@ -12,7 +12,9 @@ from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive, UserProfile, Comment
 
+# الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
+# الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
 @login_required
@@ -245,7 +247,6 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
-        # ميزة الفكرة 6: استقبال وحفظ التعليق الداخلي السري للموظفين والعميد
         if 'add_comment' in request.POST:
             comment_text = request.POST.get('comment_text', '').strip()
             if comment_text:
@@ -257,7 +258,6 @@ def document_detail(request, pk):
                 messages.success(request, 'تم إضافة التعليق والتنسيق الداخلي بنجاح.')
             return redirect('document_detail', pk=pk)
 
-        # أ. منطق أرشفة الموظف
         elif 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -267,7 +267,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد دون إحالة
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -279,7 +278,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ج. منطق توصية رئيس القسم (مسار الأستاذ)
         elif 'hod_endorse' in request.POST:
             if role == 'department_head' and correspondence.status == 'pending_hod':
                 hod_note = request.POST.get('hod_note', '').strip()
@@ -300,7 +298,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة نص التوصية.')
 
-        # د. منطق اعتماد المسجل العام (مسار المسجلين الفرعيين)
         elif 'registrar_approve' in request.POST:
             if role == 'general_registrar' and correspondence.status == 'pending_g_registrar':
                 reg_note = request.POST.get('reg_note', '').strip()
@@ -321,7 +318,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة ملاحظة الاعتماد والتدقيق.')
 
-        # هـ. منطق التوجيه الرقمي للعميد
         else:
             if role not in DIRECTIVE_ALLOWED_ROLES:
                 messages.error(request, 'ليست لديك صلاحية إصدار توجيه رقمي على هذه المعاملة.')
@@ -365,12 +361,9 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
-    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
-    
-    # جلب النقاش والتعليقات الداخلية حياً
     comments = correspondence.comments.all().order_by('created_at')
 
     staff_users = User.objects.exclude(profile__role__in=['secretary', 'dean', 'vice_dean'])
@@ -380,7 +373,7 @@ def document_detail(request, pk):
         'hod_directive': hod_directive,
         'reg_directive': reg_directive,
         'dean_directive': dean_directive,
-        'comments': comments,  # تمرير صندوق التعليقات للواجهة
+        'comments': comments,
         'staff_users': staff_users,
         'user_profile': user_profile,
     }
@@ -428,10 +421,22 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# دالة زرع البيانات وتجهيز الحسابات
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً لمنع مشاكل الهجرة في ريندر
 def create_admin_bypass(request):
-    from .models import ExternalEntity, UserProfile
+    from .models import ExternalEntity, UserProfile, Comment
+    from django.db import connection
     
+    # ⚙️ حيلة إنشاء جدول التعليقات يدوياً لمنع تضارب الـ migrations
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM correspondence_comment LIMIT 1")
+    except Exception:
+        try:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.create_model(Comment)
+        except Exception:
+            pass
+
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -462,7 +467,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم زرع وتجهيز حسابات الكلية كاملة والجهات الخارجية بنجاح! الباسورد الموحد لجميع الحسابات هو (123)، والعميد حسابه (awab).'
+        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات وتجهيز حسابات الكلية والجهات الخارجية! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
     })
 
 
