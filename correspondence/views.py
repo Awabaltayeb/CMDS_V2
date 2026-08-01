@@ -10,21 +10,20 @@ from django.db import transaction
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
+from .models import Correspondence, ExternalEntity, Directive, Comment, Notification, ReferenceCounter
 
 # الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 # الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
-# 1. لوحة التحكم الرئيسية مع البحث والفلترة
 @login_required
 def dashboard(request):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # مصفوفة الخصوصية وقيد السرية الفائقة
+    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -141,7 +140,6 @@ def dashboard(request):
     return render(request, 'correspondence/dashboard.html', context)
 
 
-# 1-ب. تحميل نسخة احتياطية فورية (للعميد والنائب فقط)
 @login_required
 def download_backup(request):
     user_profile = request.user.profile
@@ -158,7 +156,6 @@ def download_backup(request):
     )
 
 
-# 2. واجهة رفع الخطابات الرسمية
 @login_required
 def upload_document(request):
     user_profile = request.user.profile
@@ -242,14 +239,13 @@ def upload_document(request):
     return render(request, 'correspondence/upload_document.html', context)
 
 
-# 3. واجهة عرض التفاصيل والتوجيه الرقمي والأرشفة (سد ثغرة IDOR)
 @login_required
 def document_detail(request, pk):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # سد ثغرة IDور: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
+    # سد ثغرة IDOR
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -274,7 +270,7 @@ def document_detail(request, pk):
     correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
-    # قيد السرية الفائقة: يمنع نائب العميد والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ والمسؤول المستهدف بالتنفيذ
+    # قيد السرية الفائقة
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -282,7 +278,6 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
-        # ميزة الفكرة 6: استقبال وحفظ التعليق الداخلي السري للموظفين والعميد
         if 'add_comment' in request.POST:
             comment_text = request.POST.get('comment_text', '').strip()
             if comment_text:
@@ -294,7 +289,6 @@ def document_detail(request, pk):
                 messages.success(request, 'تم إضافة التعليق والتنسيق الداخلي بنجاح.')
             return redirect('document_detail', pk=pk)
 
-        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         elif 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -304,7 +298,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -316,7 +309,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ج. ميزة الفكرة 3: إرجاع ورفض المعاملة مع توثيق السبب والتحول لـ returned وإرسال تنبيه
         elif 'return_document' in request.POST:
             return_reason = request.POST.get('return_reason', '').strip()
             if return_reason:
@@ -336,7 +328,6 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى كتابة سبب الإرجاع بالتفصيل.')
 
-        # د. منطق توصية رئيس القسم (مسار الأستاذ)
         elif 'hod_endorse' in request.POST:
             if role == 'department_head' and correspondence.status == 'pending_hod':
                 hod_note = request.POST.get('hod_note', '').strip()
@@ -364,7 +355,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة نص التوصية.')
 
-        # هـ. منطق اعتماد المسجل العام (مسار المسجلين الفرعيين)
         elif 'registrar_approve' in request.POST:
             if role == 'general_registrar' and correspondence.status == 'pending_g_registrar':
                 reg_note = request.POST.get('reg_note', '').strip()
@@ -392,7 +382,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة ملاحظة الاعتماد والتدقيق.')
 
-        # و. منطق التوجيه الرقمي للعميد
         else:
             if role not in DIRECTIVE_ALLOWED_ROLES:
                 messages.error(request, 'ليست لديك صلاحية إصدار توجيه رقمي على هذه المعاملة.')
@@ -469,7 +458,7 @@ def document_detail(request, pk):
     return render(request, 'correspondence/document_detail.html', context)
 
 
-# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع (ميزة الفكرة 3 الجديدة وحل الـ AttributeError)
+# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع
 @login_required
 def edit_document(request, pk):
     user_profile = request.user.profile
