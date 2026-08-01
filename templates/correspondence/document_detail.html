@@ -215,6 +215,7 @@
                 <div class="card card-custom p-4 flex-grow-1">
                     <h5 class="fw-bold text-primary mb-4"><i class="bi bi-shield-check"></i> التوجيهات والقرارات الرقمية</h5>
 
+                    <!-- أ. عرض توصية رئيس القسم السابقة إن وجدت -->
                     {% if hod_directive %}
                         <div class="alert alert-success border-0 p-3 mb-3 small">
                             <h6 class="fw-bold text-success mb-1"><i class="bi bg-success text-white px-2 py-1 rounded me-1 bi-pencil-square"></i> توصية رئيس القسم المعتمدة:</h6>
@@ -223,6 +224,7 @@
                         </div>
                     {% endif %}
 
+                    <!-- ب. عرض اعتماد ومراجعة المسجل العام السابقة إن وجدت -->
                     {% if reg_directive %}
                         <div class="alert alert-warning border-0 p-3 mb-3 small">
                             <h6 class="fw-bold text-dark mb-1"><i class="bi bg-warning text-dark px-2 py-1 rounded me-1 bi-pencil-square"></i> اعتماد المسجل العام للكلية:</h6>
@@ -231,6 +233,7 @@
                         </div>
                     {% endif %}
 
+                    <!-- ج. عرض توجيه العميد/النائب الصادر المعتمد للموظف إن وجد -->
                     {% if dean_directive %}
                         <div class="alert alert-info border-0 p-4 mb-3">
                             <h6 class="fw-bold text-dark mb-2"><i class="bi bi-info-circle-fill"></i> توجيه العميد المعتمد:</h6>
@@ -243,6 +246,7 @@
                             </div>
                         </div>
 
+                        <!-- زر التنفيذ والأرشفة للموظف المستهدف فقط إذا كانت المعاملة بحالة "موجه" -->
                         {% if correspondence.status == 'assigned' and dean_directive.assigned_to == request.user %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
@@ -251,13 +255,16 @@
                         {% endif %}
                     {% endif %}
 
+                    <!-- د. رسالة نجاح الأرشفة النهائية إذا تحولت الحالة إلى "مؤرشف" -->
                     {% if correspondence.status == 'archived' %}
                         <div class="alert alert-success border-0 p-3 text-center fw-bold small">
                             <i class="bi bi-check-all"></i> تم تنفيذ هذه المعاملة بنجاح وتعتبر مؤرشفة حالياً.
                         </div>
                     {% endif %}
 
+                    <!-- هـ. النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
                     {% if not existing_directive %}
+                        <!-- 1. نموذج رئيس القسم -->
                         {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
@@ -268,6 +275,7 @@
                                 <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
                             </form>
 
+                        <!-- 2. نموذج المسجل العام -->
                         {% elif correspondence.status == 'pending_g_registrar' and user_profile.role == 'general_registrar' %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
@@ -278,6 +286,7 @@
                                 <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
                             </form>
 
+                        <!-- 3. نموذج العميد المعتاد المطور -->
                         {% elif correspondence.status == 'pending_dean' and user_profile.role == 'dean' or user_profile.role == 'vice_dean' %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
@@ -301,11 +310,13 @@
 
                             <hr class="my-4 text-muted">
                             
+                            <!-- زر الأرشفة الفورية المباشرة للعميد دون إحالة لأي موظف -->
                             <form method="post" action="">
                                 {% csrf_token %}
                                 <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
                             </form>
 
+                        <!-- 4. في حالة عدم وجود إجراء بعد ولست صاحب الصلاحية الحالية -->
                         {% else %}
                             {% if correspondence.status != 'archived' and correspondence.status != 'assigned' %}
                                 <div class="text-center py-5">
@@ -313,13 +324,14 @@
                                 </div>
                             {% endif %}
                         {% endif %}
-                    {% endif %}
+                    {% endif %} <!-- السطر المفقود الحاسم الذي أصلحناه لإغلاق الشرط الخارجي بالتمام! -->
                 </div>
 
                 <!-- 💬 ميزة الفكرة 6: صندوق النقاش والتنسيق السري الداخلي للخطاب -->
                 <div class="card card-custom p-4">
                     <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-chat-dots-fill text-primary"></i> نقاش وتنسيق داخلي سري</h5>
                     
+                    <!-- عرض التعليقات السابقة -->
                     <div class="comments-box mb-3">
                         {% for comment in comments %}
                             <div class="comment-item mb-2 pb-2">
@@ -334,6 +346,7 @@
                         {% endfor %}
                     </div>
 
+                    <!-- نموذج إضافة تعليق جديد سريع -->
                     <form method="post" action="">
                         {% csrf_token %}
                         <div class="input-group input-group-sm">
@@ -346,4 +359,4 @@
         </div>
     </div>
 </body>
-</html>
+    </html>
