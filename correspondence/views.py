@@ -23,6 +23,7 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
+    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -34,6 +35,7 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
+    # مصفوفة الرؤية والفرز الهرمي بالتمام والكمال
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -67,6 +69,7 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
+    # مجلدات الأرشيف الديناميكية الذكية
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -78,6 +81,7 @@ def dashboard(request):
         elif folder == 'internal':
             correspondences = correspondences.filter(scope='internal')
 
+    # محرك البحث والفلترة
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -103,6 +107,7 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
+    # حساب الإحصائيات الحية والديناميكية بناءً على صندوق الموظف الحالي
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
@@ -216,6 +221,7 @@ def document_detail(request, pk):
     role = user_profile.role
     user = request.user
     
+    # سد ثغرة IDOR: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -240,6 +246,7 @@ def document_detail(request, pk):
     correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
+    # قيد السرية الفائقة: يمنع نائب العميد والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ والمسؤول المستهدف بالتنفيذ
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -361,6 +368,7 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
+    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
@@ -421,16 +429,27 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً لمنع مشاكل الهجرة في ريندر
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment
     from django.db import connection
     
-    # ⚙️ حيلة إنشاء جدول التعليقات يدوياً لمنع تضارب الـ migrations
+    # ⚙️ حيلة سحرية مخصصة لـ PostgreSQL للتحقق من وجود الجدول بأمان ودون إحباط المعاملة!
     try:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT 1 FROM correspondence_comment LIMIT 1")
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'correspondence_comment'
+                );
+            """)
+            table_exists = cursor.fetchone()[0]
     except Exception:
+        table_exists = False
+
+    # إذا كان الجدول مفقوداً، نقوم بإنشائه فوراً وبأمان تّام
+    if not table_exists:
         try:
             with connection.schema_editor() as schema_editor:
                 schema_editor.create_model(Comment)
