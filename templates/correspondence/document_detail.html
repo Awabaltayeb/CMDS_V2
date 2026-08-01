@@ -80,14 +80,12 @@
             <div class="d-flex flex-wrap justify-content-between align-items-center text-center gap-2">
                 <span class="small fw-bold text-muted"><i class="bi bi-bezier2"></i> مسار المعاملة الحركي:</span>
                 
-                <!-- خطوة 1 -->
                 <span class="badge {% if correspondence.status != 'uploaded' %}bg-success{% else %}bg-secondary{% endif %} p-2">
                      1. رُفع <i class="bi bi-check-circle-fill"></i>
                 </span>
                 
                 <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
 
-                <!-- خطوة 2 (توصية رئيس القسم أو المسجل العام) -->
                 <span class="badge 
                     {% if correspondence.status == 'pending_hod' or correspondence.status == 'pending_g_registrar' %}bg-warning text-dark
                     {% elif correspondence.status in 'pending_dean,assigned,archived' %}bg-success
@@ -98,7 +96,6 @@
 
                 <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
 
-                <!-- خطوة 3 (مراجعة العميد) -->
                 <span class="badge 
                     {% if correspondence.status == 'pending_dean' %}bg-warning text-dark
                     {% elif correspondence.status in 'assigned,archived' %}bg-success
@@ -109,7 +106,6 @@
 
                 <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
 
-                <!-- خطوة 4 (موجه) -->
                 <span class="badge 
                     {% if correspondence.status == 'assigned' %}bg-warning text-dark
                     {% elif correspondence.status == 'archived' %}bg-success
@@ -120,7 +116,6 @@
 
                 <i class="bi bi-arrow-left text-muted d-none d-sm-inline"></i>
 
-                <!-- خطوة 5 (مؤرشف) -->
                 <span class="badge {% if correspondence.status == 'archived' %}bg-success{% else %}bg-secondary{% endif %} p-2">
                     5. مؤرشف ومنفذ ✓
                 </span>
@@ -173,7 +168,6 @@
 
                     <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> محتوى ومستند المعاملة:</h6>
                     
-                    <!-- حماية أمنية: إذا كان الملف سرياً والمستعرض ليس العميد الفعلي أو منشئ الخطاب، يُمنع تماماً من عرض الـ PDF لحفظ الخصوصية -->
                     {% if correspondence.is_confidential and user_profile.role != 'dean' and correspondence.created_by != request.user %}
                         <div class="alert alert-warning border-0 p-4 text-center my-3 fw-bold">
                             <i class="bi bi-eye-slash-fill fs-2"></i><br>
@@ -181,11 +175,9 @@
                             مسموح لك فقط باتخاذ الإجراء الإداري وتمرير المعاملة للمستوى الأعلى [1].
                         </div>
                     {% else %}
-                        <!-- إذا كان الخطاب عبارة عن ملف PDF مرفوع -->
                         {% if correspondence.file %}
                             <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
                         {% else %}
-                            <!-- عرض الترويسة والبراوز الرسمي الفخم للخطاب النصي المكتوب داخل السيستم -->
                             <div class="official-letterhead">
                                 <div class="letterhead-header">
                                     <h5 class="fw-bold mb-1">جامعة العلوم والتكنولوجيا حقتنا</h5>
@@ -215,7 +207,19 @@
                 <div class="card card-custom p-4 flex-grow-1">
                     <h5 class="fw-bold text-primary mb-4"><i class="bi bi-shield-check"></i> التوجيهات والقرارات الرقمية</h5>
 
-                    <!-- أ. عرض توصية رئيس القسم السابقة إن وجدت -->
+                    <!-- ⚠️ بطاقة الارتجاع والتصحيح باللون الأحمر (ميزة الفكرة 3) -->
+                    {% if correspondence.status == 'returned' %}
+                        <div class="alert alert-danger border-0 p-4 mb-3">
+                            <h6 class="fw-bold text-danger mb-2"><i class="bi bi-exclamation-triangle-fill"></i> تم إرجاع المعاملة لتصحيح البيانات:</h6>
+                            <p class="mb-3 lead small">{{ correspondence.return_reason }}</p>
+                            
+                            <!-- زر إعادة صياغة الخطاب يظهر فقط لمنشئ الخطاب الأصلي لتعديله وإرساله -->
+                            {% if correspondence.created_by == request.user %}
+                                <a href="{% url 'edit_document' correspondence.id %}" class="btn btn-warning w-100 py-2 fw-bold text-dark"><i class="bi bi-pencil-square"></i> إعادة صياغة وإرسال الخطاب</a>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
                     {% if hod_directive %}
                         <div class="alert alert-success border-0 p-3 mb-3 small">
                             <h6 class="fw-bold text-success mb-1"><i class="bi bg-success text-white px-2 py-1 rounded me-1 bi-pencil-square"></i> توصية رئيس القسم المعتمدة:</h6>
@@ -224,7 +228,6 @@
                         </div>
                     {% endif %}
 
-                    <!-- ب. عرض اعتماد ومراجعة المسجل العام السابقة إن وجدت -->
                     {% if reg_directive %}
                         <div class="alert alert-warning border-0 p-3 mb-3 small">
                             <h6 class="fw-bold text-dark mb-1"><i class="bi bg-warning text-dark px-2 py-1 rounded me-1 bi-pencil-square"></i> اعتماد المسجل العام للكلية:</h6>
@@ -233,7 +236,6 @@
                         </div>
                     {% endif %}
 
-                    <!-- ج. عرض توجيه العميد/النائب الصادر المعتمد للموظف إن وجد -->
                     {% if dean_directive %}
                         <div class="alert alert-info border-0 p-4 mb-3">
                             <h6 class="fw-bold text-dark mb-2"><i class="bi bi-info-circle-fill"></i> توجيه العميد المعتمد:</h6>
@@ -255,24 +257,33 @@
                         {% endif %}
                     {% endif %}
 
-                    <!-- د. رسالة نجاح الأرشفة النهائية إذا تحولت الحالة إلى "مؤرشف" -->
                     {% if correspondence.status == 'archived' %}
                         <div class="alert alert-success border-0 p-3 text-center fw-bold small">
                             <i class="bi bi-check-all"></i> تم تنفيذ هذه المعاملة بنجاح وتعتبر مؤرشفة حالياً.
                         </div>
                     {% endif %}
 
-                    <!-- هـ. النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
-                    {% if not existing_directive %}
+                    <!-- النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
+                    {% if not existing_directive and correspondence.status != 'returned' %}
+                        
                         <!-- 1. نموذج رئيس القسم -->
                         {% if correspondence.status == 'pending_hod' and user_profile.role == 'department_head' %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
                                 <div class="mb-3">
                                     <label for="hod_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> توصية وإفادة رئيس القسم الموجهة للعميد:</label>
-                                    <textarea name="hod_note" class="form-control" id="hod_note" rows="5" required placeholder="يرجى كتابة توصيتك الإدارية على خطاب الأستاذ هنا..."></textarea>
+                                    <textarea name="hod_note" class="form-control" id="hod_note" rows="3" required placeholder="يرجى كتابة توصيتك الإدارية على خطاب الأستاذ هنا..."></textarea>
                                 </div>
-                                <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للسيد العميد</button>
+                                <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold mb-2"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للعميد</button>
+                            </form>
+
+                            <!-- زر الارتجاع والرفض لرئيس القسم مع تبيين السبب -->
+                            <form method="post" class="mt-2">
+                                {% csrf_token %}
+                                <div class="mb-2">
+                                    <input type="text" name="return_reason" class="form-control form-control-sm" required placeholder="اكتب سبب إرجاع ورفض الخطاب هنا بالتفصيل...">
+                                </div>
+                                <button type="submit" name="return_document" class="btn btn-outline-danger w-100 py-1 fw-bold btn-sm"><i class="bi bi-reply-fill"></i> إرجاع الخطاب للأستاذ لتعديله</button>
                             </form>
 
                         <!-- 2. نموذج المسجل العام -->
@@ -281,9 +292,18 @@
                                 {% csrf_token %}
                                 <div class="mb-3">
                                     <label for="reg_note" class="form-label small fw-bold text-success"><i class="bi bi-pencil-square"></i> تدقيق واعتماد المسجل العام الموجه للعميد:</label>
-                                    <textarea name="reg_note" class="form-control" id="reg_note" rows="5" required placeholder="يرجى كتابة ملاحظة الاعتماد على خطاب المسجل الفرعي هنا..."></textarea>
+                                    <textarea name="reg_note" class="form-control" id="reg_note" rows="3" required placeholder="يرجى كتابة ملاحظة الاعتماد على خطاب المسجل الفرعي هنا..."></textarea>
                                 </div>
-                                <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للسيد العميد</button>
+                                <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold mb-2"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للعميد</button>
+                            </form>
+
+                            <!-- زر الارتجاع والرفض للمسجل العام مع تبيين السبب -->
+                            <form method="post" class="mt-2">
+                                {% csrf_token %}
+                                <div class="mb-2">
+                                    <input type="text" name="return_reason" class="form-control form-control-sm" required placeholder="اكتب سبب إرجاع ورفض الخطاب هنا بالتفصيل...">
+                                </div>
+                                <button type="submit" name="return_document" class="btn btn-outline-danger w-100 py-1 fw-bold btn-sm"><i class="bi bi-reply-fill"></i> إرجاع الخطاب للمسجل الفرعي لتعديله</button>
                             </form>
 
                         <!-- 3. نموذج العميد المعتاد المطور -->
@@ -302,21 +322,29 @@
 
                                 <div class="mb-3">
                                     <label for="directive_text" class="form-label small fw-bold"><i class="bi bi-chat-text-fill"></i> نص التوجيه الرقمي (الأمر الإداري):</label>
-                                    <textarea name="directive_text" class="form-control" id="directive_text" rows="6" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
+                                    <textarea name="directive_text" class="form-control" id="directive_text" rows="5" required placeholder="مثال: يرجى مراجعة الطلب وتنفيذه والإفادة بالرد للمكتب..."></textarea>
                                 </div>
 
-                                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold"><i class="bi bi-send-fill"></i> اعتماد التوجيه وإرسال المعاملة</button>
+                                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold mb-2"><i class="bi bi-send-fill"></i> اعتماد التوجيه وإرسال المعاملة</button>
+                            </form>
+
+                            <!-- زر الارتجاع والرفض للعميد/النائب مع تبيين السبب ليرجع لمنشئه الأصلي للتصحيح -->
+                            <form method="post" class="mt-2">
+                                {% csrf_token %}
+                                <div class="mb-2">
+                                    <input type="text" name="return_reason" class="form-control form-control-sm" required placeholder="اكتب سبب إرجاع ورفض الخطاب هنا بالتفصيل...">
+                                </div>
+                                <button type="submit" name="return_document" class="btn btn-outline-danger w-100 py-1 fw-bold btn-sm"><i class="bi bi-reply-fill"></i> إرجاع الخطاب لمنشئه لتصحيحه</button>
                             </form>
 
                             <hr class="my-4 text-muted">
                             
-                            <!-- زر الأرشفة الفورية المباشرة للعميد دون إحالة لأي موظف -->
+                            <!-- زر الأرشفة الفورية المباشرة للعميد -->
                             <form method="post" action="">
                                 {% csrf_token %}
                                 <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
                             </form>
 
-                        <!-- 4. في حالة عدم وجود إجراء بعد ولست صاحب الصلاحية الحالية -->
                         {% else %}
                             {% if correspondence.status != 'archived' and correspondence.status != 'assigned' %}
                                 <div class="text-center py-5">
@@ -324,14 +352,13 @@
                                 </div>
                             {% endif %}
                         {% endif %}
-                    {% endif %} <!-- السطر المفقود الحاسم الذي أصلحناه لإغلاق الشرط الخارجي بالتمام! -->
+                    {% endif %}
                 </div>
 
                 <!-- 💬 ميزة الفكرة 6: صندوق النقاش والتنسيق السري الداخلي للخطاب -->
                 <div class="card card-custom p-4">
                     <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-chat-dots-fill text-primary"></i> نقاش وتنسيق داخلي سري</h5>
                     
-                    <!-- عرض التعليقات السابقة -->
                     <div class="comments-box mb-3">
                         {% for comment in comments %}
                             <div class="comment-item mb-2 pb-2">
@@ -346,7 +373,6 @@
                         {% endfor %}
                     </div>
 
-                    <!-- نموذج إضافة تعليق جديد سريع -->
                     <form method="post" action="">
                         {% csrf_token %}
                         <div class="input-group input-group-sm">
@@ -359,4 +385,4 @@
         </div>
     </div>
 </body>
-    </html>
+</html>
