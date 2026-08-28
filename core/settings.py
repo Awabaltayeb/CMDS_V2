@@ -58,11 +58,12 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 if config('USE_POSTGRES', default=False, cast=bool) or config('DATABASE_URL', default=''):
     DATABASES = {
-        'default': dj_database_url.config(
-            default=config('DATABASE_URL', default=''),
-            conn_max_age=600,
-            conn_health_checks=True,
-        )
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL', default=''),
+        conn_max_age=600,
+        conn_health_checks=True,
+        ssl_require=True,  # السطر الجديد الحاسم لتفعيل تشفير SSL ومنع الإغلاق المفاجئ!
+    )
     }
 else:
     DATABASES = {
