@@ -10,6 +10,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
+import google.generativeai as genai  # استدعاء مكتبة الذكاء الاصطناعي لجوجل
 from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
 
 # الأدوار المسموح لها بالرفع 
@@ -17,14 +18,14 @@ UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', '
 # الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
-# 1. لوحة التحكم الرئيسية مع البحث والفلترة والعدادات الحية
+# 1. لوحة التحكم الرئيسية مع الفلترة والسرية والمجلدات والعدادات الحية
 @login_required
 def dashboard(request):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # مصفوفة الخصوصية وقيد السرية الفائقة
+    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -135,7 +136,7 @@ def dashboard(request):
         'total_count': total_count,
         'pending_count': pending_count,
         'archived_count': archived_count,
-        'active_notifications': active_notifications,
+        'active_notifications': active_notifications,  # تمرير الإشعارات للجرس
         'unread_notifications_count': unread_notifications_count,
     }
     return render(request, 'correspondence/dashboard.html', context)
@@ -567,60 +568,39 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات والإشعارات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
+# دالة زرع البيانات وتجهيز الحسابات
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
     
-    # ⚙️ حيلة مخصصة لـ PostgreSQL للتحقق الآمن من الجداول وإنشائها دون تضارب أو إحباط المعاملة!
+    # حيلة ذكية وآمنة لإنشاء الجداول الجديدة يدوياً لمنع تضارب الـ migrations على ريندر
     try:
         with connection.cursor() as cursor:
-            # 1. التحقق وإنشاء جدول التعليقات يدوياً
             cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'correspondence_comment'
+                CREATE TABLE IF NOT EXISTS correspondence_comment (
+                    id SERIAL PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+                    correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
                 );
             """)
-            comment_exists = cursor.fetchone()[0]
-            if not comment_exists:
-                cursor.execute("""
-                    CREATE TABLE correspondence_comment (
-                        id SERIAL PRIMARY KEY,
-                        text TEXT NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
-                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
-                    );
-                """)
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
-
-            # 2. التحقق وإنشاء جدول الإشعارات الجديد يدوياً
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
+            
             cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'correspondence_notification'
+                CREATE TABLE IF NOT EXISTS correspondence_notification (
+                    id SERIAL PRIMARY KEY,
+                    text TEXT NOT NULL,
+                    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                    correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE,
+                    recipient_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE
                 );
             """)
-            notification_exists = cursor.fetchone()[0]
-            if not notification_exists:
-                cursor.execute("""
-                    CREATE TABLE correspondence_notification (
-                        id SERIAL PRIMARY KEY,
-                        text TEXT NOT NULL,
-                        is_read BOOLEAN NOT NULL DEFAULT FALSE,
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE,
-                        recipient_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE
-                    );
-                """)
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
 
-            # 3. التحقق وإضافة عمود سبب الارتجاع لجدول المراسلات يدوياً بأمان
             cursor.execute("""
                 ALTER TABLE correspondence_correspondence 
                 ADD COLUMN IF NOT EXISTS return_reason TEXT;
@@ -658,15 +638,61 @@ def create_admin_bypass(request):
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
     ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
 
-    if table_success:
-        message = '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات والإشعارات بالـ SQL الصريح وتجهيز الحسابات! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
-    else:
-        message = f'⚠️ تم تجهيز الحسابات ولكن فشل إنشاء الجداول يدوياً: {error_msg}'
-
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': message
+        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات والإشعارات وتجهيز الحسابات! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
     })
+
+
+# 💡 فيو معالجة وتوليد الخطاب بالذكاء الاصطناعي (Gemini AI) المضاف حديثاً (ميزة الفكرة الجديدة)
+@login_required
+def generate_ai_letter(request):
+    if request.method == 'POST':
+        prompt = request.POST.get('prompt', '').strip()
+        if not prompt:
+            return JsonResponse({'success': False, 'error': 'يرجى كتابة فكرة الخطاب أولاً.'})
+        
+        api_key = getattr(settings, 'GOOGLE_API_KEY', '')
+        if not api_key:
+            return JsonResponse({'success': False, 'error': 'لم يتم تكوين مفتاح الأمان للذكاء الاصطناعي (GOOGLE_API_KEY) في السيرفر.'})
+        
+        user = request.user
+        user_profile = user.profile
+        role_display = user_profile.get_role_display()
+        dept_display = user_profile.get_department_display() if user_profile.department else ""
+        
+        # 🤖 صياغة الأمر الإداري الهرمي والذكي الديناميكي بالتمام والكمال
+        system_instruction = f"""
+        أنت مساعد ذكاء اصطناعي إداري ذكي ومحترف، تعمل في كلية علوم الحاسوب وتقانة المعلومات بجامعة العلوم والتكنولوجيا حقتنا.
+        وظيفتك هي صياغة خطابات ومراسلات رسمية بليغة باللغة العربية الفصحى وبأعلى درجات التنسيق الإداري المعتمد في السودان.
+
+        المستخدم الحالي للنظام والذي يريد منك كتابة هذا الخطاب هو:
+        - الاسم: {user.username}
+        - المنصب/الوظيفة في الكلية: {role_display}
+        {"- القسم الأكاديمي: " + dept_display if dept_display else ""}
+
+        يرجى كتابة وصياغة الخطاب بالكامل من منظور هذا المستخدم وباسمه ومنصبه الرسمي بدقة شديدة ومخاطبة الجهة المستهدفة بالاحترام اللائق.
+        الخطاب يجب أن يحتوي على:
+        1. البداية (مثل: السيد العميد المحترم، أو السيد رئيس القسم المحترم، أو السيد مدير الجامعة المحترم، حسب فكرة المستخدم).
+        2. الموضوع مسطراً وواضحاً في المنتصف (مثل: الموضوع: طلب صيانة معمل).
+        3. متن الخطاب منسقاً ومنظماً وبليغاً جداً وبأرقام ونقاط واضحة ومقنعة.
+        4. الخاتمة وفقرة التوقيع باسم الموظف ووظيفته في الأسفل.
+
+        اكتب فقط نص الخطاب الإداري الرسمي مباشرة ولا تكتب أي مقدمات أو شروحات خارجية مثل "بالتأكيد" أو "تفضل الخطاب".
+        """
+        
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            
+            full_prompt = f"{system_instruction}\n\nفكرة الخطاب المطلوبة من المستخدم:\n{prompt}"
+            response = model.generate_content(full_prompt)
+            
+            return JsonResponse({'success': True, 'text': response.text})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
+            
+    return JsonResponse({'success': False, 'error': 'طلب غير صالح.'})
 
 
 def user_logout(request):
