@@ -13,11 +13,22 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
 
-from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
+# استدعاء جميع النماذج بما فيها UserProfile
+from .models import (
+    Correspondence,
+    ExternalEntity,
+    Directive,
+    Comment,
+    Notification,
+    UserProfile,
+)
 from .backup_utils import create_backup, apply_retention_policy
 
 # الأدوار المسموح لها بالرفع 
-UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
+UPLOAD_ALLOWED_ROLES = [
+    'secretary', 'dean', 'vice_dean', 'general_registrar', 
+    'student_registrar', 'exams_registrar', 'faculty_member'
+]
 # الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
@@ -28,6 +39,7 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
+    # فلترة السرية الفائقة
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -39,6 +51,7 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
+    # مصفوفة الرؤية الهرمية
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -72,7 +85,7 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
-    # مجلدات الأرشيف
+    # مجلدات الأرشيف الذكية
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -110,10 +123,12 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
+    # الإحصائيات
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
 
+    # الإشعارات
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -211,7 +226,7 @@ def upload_document(request):
         with transaction.atomic():
             correspondence.save()
             
-            # إرسال إشعار للمستوى الإداري الأعلى
+            # توليد إشعار فوري للمستوى الإداري الأعلى
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
@@ -246,7 +261,6 @@ def edit_document(request, pk):
     correspondence = get_object_or_404(Correspondence, pk=pk)
     user_profile = request.user.profile
 
-    # التحقق من أن المستخدم هو صاحب الخطاب الأصلي وأن الخطاب في حالة 'returned'
     if correspondence.created_by != request.user or correspondence.status != 'returned':
         messages.error(request, 'لا تملك صلاحية تعديل هذه المعاملة أو أنها ليست في حالة ارتجاع.')
         return redirect('dashboard')
@@ -279,7 +293,7 @@ def edit_document(request, pk):
         correspondence.recipient_internal_id = request.POST.get('recipient_internal') or None
         correspondence.recipient_external_id = request.POST.get('recipient_external') or None
 
-        # إعادة ضبط الحالة لمسار التدقيق من جديد
+        # إعادة ضبط الحالة لمسار التدقيق
         role = user_profile.role
         if role == 'faculty_member':
             correspondence.status = 'pending_hod'
@@ -288,7 +302,7 @@ def edit_document(request, pk):
         else:
             correspondence.status = 'pending_dean'
 
-        correspondence.return_reason = None  # تصفير سبب الإرجاع بعد المعالجة
+        correspondence.return_reason = None
 
         try:
             correspondence.full_clean()
@@ -299,7 +313,6 @@ def edit_document(request, pk):
         with transaction.atomic():
             correspondence.save()
 
-            # إشعار المسؤول الأعلى بإعادة الرفع بعد التصحيح
             notify_user = None
             if role == 'faculty_member':
                 notify_user = User.objects.filter(profile__role='department_head', profile__department=user_profile.department).first()
@@ -366,7 +379,7 @@ def document_detail(request, pk):
     role = user_profile.role
     user = request.user
     
-    # حماية IDOR: استرجاع المعاملة من نطاق الرؤية المسموح به فقط
+    # حماية IDOR: جلب المعاملة من نطاق الرؤية المصرح به فقط
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -655,7 +668,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تجهيز الحسابات الأولية بنجاح! حساب العميد هو awab وكلمة المرور 123.'
+        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وتجهيز الحسابات! حساب العميد هو awab وكلمة المرور 123.'
     })
 
 
