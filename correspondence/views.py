@@ -6,25 +6,25 @@ from django.contrib import messages
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.db import connection, transaction  # أضفنا connection هنا لتعريفها برمجياً ومنع خطأ الـ 500
-from django.http import FileResponse, Http404
+from django.db import transaction
+from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
 from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
 
-# الأدوار المسموح لها برفع خطاب جديد إلى النظام
-UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'department_head', 'faculty_member']
+# الأدوار المسموح لها بالرفع 
+UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 # الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
-# 1. لوحة التحكم الرئيسية مع الفلترة والسرية والمجلدات
+# 1. لوحة التحكم الرئيسية مع البحث والفلترة والعدادات الحية
 @login_required
 def dashboard(request):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
+    # مصفوفة الخصوصية وقيد السرية الفائقة
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -294,7 +294,7 @@ def document_detail(request, pk):
                 messages.success(request, 'تم إضافة التعليق والتنسيق الداخلي بنجاح.')
             return redirect('document_detail', pk=pk)
 
-        # أ. منطق أرشفة الموظف
+        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         elif 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -304,7 +304,7 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد دون إحالة
+        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -469,6 +469,54 @@ def document_detail(request, pk):
     return render(request, 'correspondence/document_detail.html', context)
 
 
+# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع (ميزة الفكرة 3 الجديدة وحل الـ AttributeError)
+@login_required
+def edit_document(request, pk):
+    user_profile = request.user.profile
+    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
+    
+    if request.method == 'POST':
+        subject = request.POST.get('subject')
+        direction = request.POST.get('direction')
+        scope = request.POST.get('scope')
+        addressed_to_type = request.POST.get('addressed_to_type')
+        
+        # تحديث البيانات الأساسية
+        correspondence.subject = subject
+        correspondence.direction = direction
+        correspondence.scope = scope
+        correspondence.addressed_to_type = addressed_to_type
+        
+        # تحديث الملف إذا تم رفع ملف جديد
+        new_file = request.FILES.get('file')
+        if new_file:
+            correspondence.file = new_file
+            
+        # تحديث النص إذا تم كتابة نص جديد
+        body_text = request.POST.get('body_text')
+        if body_text:
+            correspondence.body_text = body_text
+            
+        # إعادة صياغة الخطاب تصفّر حالة الارتجاع والسبب وترجعه للمسار الهرمي التلقائي
+        correspondence.status = 'uploaded'
+        correspondence.return_reason = None
+        correspondence.save()
+        
+        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
+        return redirect('dashboard')
+        
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    
+    context = {
+        'correspondence': correspondence,
+        'users': users,
+        'external_entities': external_entities,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/edit_document.html', context)
+
+
 @login_required
 def serve_protected_media(request, filename):
     file_relative_path = f"correspondence_files/{filename}"
@@ -519,7 +567,7 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات والإشعارات يدوياً لمنع تضارب الـ migrations على ريندر
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات والإشعارات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
@@ -619,57 +667,6 @@ def create_admin_bypass(request):
         'form': {},
         'message_success': message
     })
-
-
-# فيو معالجة وتوليد الخطاب بالذكاء الاصطناعي (Gemini AI) المضاف حديثاً (ميزة الفكرة الجديدة)
-@login_required
-def generate_ai_letter(request):
-    if request.method == 'POST':
-        prompt = request.POST.get('prompt', '').strip()
-        if not prompt:
-            return JsonResponse({'success': False, 'error': 'يرجى كتابة فكرة الخطاب أولاً.'})
-        
-        api_key = getattr(settings, 'GOOGLE_API_KEY', '')
-        if not api_key:
-            return JsonResponse({'success': False, 'error': 'لم يتم تكوين مفتاح الأمان للذكاء الاصطناعي (GOOGLE_API_KEY) في السيرفر.'})
-        
-        user = request.user
-        user_profile = user.profile
-        role_display = user_profile.get_role_display()
-        dept_display = user_profile.get_department_display() if user_profile.department else ""
-        
-        # 🤖 صياغة الأمر الإداري الهرمي والذكي الديناميكي بالتمام والكمال
-        system_instruction = f"""
-        أنت مساعد ذكاء اصطناعي إداري ذكي ومحترف، تعمل في كلية علوم الحاسوب وتقانة المعلومات بجامعة العلوم والتكنولوجيا حقتنا.
-        وظيفتك هي صياغة خطابات ومراسلات رسمية بليغة باللغة العربية الفصحى وبأعلى درجات التنسيق الإداري المعتمد في السودان.
-
-        المستخدم الحالي للنظام والذي يريد منك كتابة هذا الخطاب هو:
-        - الاسم: {user.username}
-        - المنصب/الوظيفة في الكلية: {role_display}
-        {"- القسم الأكاديمي: " + dept_display if dept_display else ""}
-
-        يرجى كتابة وصياغة الخطاب بالكامل من منظور هذا المستخدم وباسمه ومنصبه الرسمي بدقة شديدة ومخاطبة الجهة المستهدفة بالاحترام اللائق.
-        الخطاب يجب أن يحتوي على:
-        1. البداية (مثل: السيد العميد المحترم، أو السيد رئيس القسم المحترم، أو السيد مدير الجامعة المحترم، حسب فكرة المستخدم).
-        2. الموضوع مسطراً وواضحاً في المنتصف (مثل: الموضوع: طلب صيانة معمل).
-        3. متن الخطاب منسقاً ومنظماً وبليغاً جداً وبأرقام ونقاط واضحة ومقنعة.
-        4. الخاتمة وفقرة التوقيع باسم الموظف ووظيفته في الأسفل.
-
-        اكتب فقط نص الخطاب الإداري الرسمي مباشرة ولا تكتب أي مقدمات أو شروحات خارجية مثل "بالتأكيد" أو "تفضل الخطاب".
-        """
-        
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            
-            full_prompt = f"{system_instruction}\n\nفكرة الخطاب المطلوبة من المستخدم:\n{prompt}"
-            response = model.generate_content(full_prompt)
-            
-            return JsonResponse({'success': True, 'text': response.text})
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
-            
-    return JsonResponse({'success': False, 'error': 'طلب غير صالح.'})
 
 
 def user_logout(request):
