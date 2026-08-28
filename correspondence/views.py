@@ -10,7 +10,6 @@ from django.db import transaction
 from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
-import google.generativeai as genai  # استدعاء مكتبة الذكاء الاصطناعي لجوجل
 from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
 
 # الأدوار المسموح لها بالرفع 
@@ -142,7 +141,6 @@ def dashboard(request):
     return render(request, 'correspondence/dashboard.html', context)
 
 
-# 1-ب. تحميل نسخة احتياطية فورية (للعميد والنائب فقط)
 @login_required
 def download_backup(request):
     user_profile = request.user.profile
@@ -159,7 +157,6 @@ def download_backup(request):
     )
 
 
-# 2. واجهة رفع الخطابات الرسمية
 @login_required
 def upload_document(request):
     user_profile = request.user.profile
@@ -243,7 +240,6 @@ def upload_document(request):
     return render(request, 'correspondence/upload_document.html', context)
 
 
-# 3. واجهة عرض التفاصيل والتوجيه الرقمي والأرشفة (سد ثغرة IDOR)
 @login_required
 def document_detail(request, pk):
     user_profile = request.user.profile
@@ -470,54 +466,6 @@ def document_detail(request, pk):
     return render(request, 'correspondence/document_detail.html', context)
 
 
-# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع (ميزة الفكرة 3 الجديدة وحل الـ AttributeError)
-@login_required
-def edit_document(request, pk):
-    user_profile = request.user.profile
-    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
-    
-    if request.method == 'POST':
-        subject = request.POST.get('subject')
-        direction = request.POST.get('direction')
-        scope = request.POST.get('scope')
-        addressed_to_type = request.POST.get('addressed_to_type')
-        
-        # تحديث البيانات الأساسية
-        correspondence.subject = subject
-        correspondence.direction = direction
-        correspondence.scope = scope
-        correspondence.addressed_to_type = addressed_to_type
-        
-        # تحديث الملف إذا تم رفع ملف جديد
-        new_file = request.FILES.get('file')
-        if new_file:
-            correspondence.file = new_file
-            
-        # تحديث النص إذا تم كتابة نص جديد
-        body_text = request.POST.get('body_text')
-        if body_text:
-            correspondence.body_text = body_text
-            
-        # إعادة صياغة الخطاب تصفّر حالة الارتجاع والسبب وترجعه للمسار الهرمي التلقائي
-        correspondence.status = 'uploaded'
-        correspondence.return_reason = None
-        correspondence.save()
-        
-        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
-        return redirect('dashboard')
-        
-    users = User.objects.all()
-    external_entities = ExternalEntity.objects.all()
-    
-    context = {
-        'correspondence': correspondence,
-        'users': users,
-        'external_entities': external_entities,
-        'user_profile': user_profile,
-    }
-    return render(request, 'correspondence/edit_document.html', context)
-
-
 @login_required
 def serve_protected_media(request, filename):
     file_relative_path = f"correspondence_files/{filename}"
@@ -568,43 +516,71 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات
+# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات والإشعارات يدوياً لمنع تضارب الـ migrations على ريندر
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
     
-    # حيلة ذكية وآمنة لإنشاء الجداول الجديدة يدوياً لمنع تضارب الـ migrations على ريندر
+    # ⚙️ حيلة مخصصة لـ PostgreSQL للتحقق الآمن من الجداول وإنشائها دون تضارب أو إحباط المعاملة!
     try:
         with connection.cursor() as cursor:
+            # 1. التحقق وإنشاء جدول التعليقات يدوياً
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS correspondence_comment (
-                    id SERIAL PRIMARY KEY,
-                    text TEXT NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                    author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
-                    correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'correspondence_comment'
                 );
             """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS correspondence_notification (
-                    id SERIAL PRIMARY KEY,
-                    text TEXT NOT NULL,
-                    is_read BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                    correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE,
-                    recipient_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE
-                );
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
+            comment_exists = cursor.fetchone()[0]
+            if not comment_exists:
+                cursor.execute("""
+                    CREATE TABLE correspondence_comment (
+                        id SERIAL PRIMARY KEY,
+                        text TEXT NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                        author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
+                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
+                    );
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
 
+            # 2. التحقق وإنشاء جدول الإشعارات الجديد يدوياً
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'correspondence_notification'
+                );
+            """)
+            notification_exists = cursor.fetchone()[0]
+            if not notification_exists:
+                cursor.execute("""
+                    CREATE TABLE correspondence_notification (
+                        id SERIAL PRIMARY KEY,
+                        text TEXT NOT NULL,
+                        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE,
+                        recipient_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE
+                    );
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
+                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
+
+            # 3. التحقق وإضافة عمود سبب الارتجاع لجدول المراسلات يدوياً بأمان
             cursor.execute("""
                 ALTER TABLE correspondence_correspondence 
                 ADD COLUMN IF NOT EXISTS return_reason TEXT;
             """)
+            
+            # 4. إضافة عمود السرية الفائقة لجدول المراسلات يدوياً بأمان ودون تعارض (الميزة المفقودة في الترحيل القديم!)
+            cursor.execute("""
+                ALTER TABLE correspondence_correspondence 
+                ADD COLUMN IF NOT EXISTS is_confidential BOOLEAN DEFAULT FALSE;
+            """)
+            
             table_success = True
     except Exception as e:
         table_success = False
@@ -638,61 +614,58 @@ def create_admin_bypass(request):
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
     ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
 
+    if table_success:
+        message = '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات والإشعارات بالـ SQL الصريح وتجهيز الحسابات! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
+    else:
+        message = f'⚠️ تم تجهيز الحسابات ولكن فشل إنشاء الجداول يدوياً: {error_msg}'
+
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات والإشعارات وتجهيز الحسابات! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
+        'message_success': message
     })
 
 
-# 💡 فيو معالجة وتوليد الخطاب بالذكاء الاصطناعي (Gemini AI) المضاف حديثاً (ميزة الفكرة الجديدة)
 @login_required
-def generate_ai_letter(request):
+def edit_document(request, pk):
+    user_profile = request.user.profile
+    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
+    
     if request.method == 'POST':
-        prompt = request.POST.get('prompt', '').strip()
-        if not prompt:
-            return JsonResponse({'success': False, 'error': 'يرجى كتابة فكرة الخطاب أولاً.'})
+        subject = request.POST.get('subject')
+        direction = request.POST.get('direction')
+        scope = request.POST.get('scope')
+        addressed_to_type = request.POST.get('addressed_to_type')
         
-        api_key = getattr(settings, 'GOOGLE_API_KEY', '')
-        if not api_key:
-            return JsonResponse({'success': False, 'error': 'لم يتم تكوين مفتاح الأمان للذكاء الاصطناعي (GOOGLE_API_KEY) في السيرفر.'})
+        correspondence.subject = subject
+        correspondence.direction = direction
+        correspondence.scope = scope
+        correspondence.addressed_to_type = addressed_to_type
         
-        user = request.user
-        user_profile = user.profile
-        role_display = user_profile.get_role_display()
-        dept_display = user_profile.get_department_display() if user_profile.department else ""
-        
-        # 🤖 صياغة الأمر الإداري الهرمي والذكي الديناميكي بالتمام والكمال
-        system_instruction = f"""
-        أنت مساعد ذكاء اصطناعي إداري ذكي ومحترف، تعمل في كلية علوم الحاسوب وتقانة المعلومات بجامعة العلوم والتكنولوجيا حقتنا.
-        وظيفتك هي صياغة خطابات ومراسلات رسمية بليغة باللغة العربية الفصحى وبأعلى درجات التنسيق الإداري المعتمد في السودان.
-
-        المستخدم الحالي للنظام والذي يريد منك كتابة هذا الخطاب هو:
-        - الاسم: {user.username}
-        - المنصب/الوظيفة في الكلية: {role_display}
-        {"- القسم الأكاديمي: " + dept_display if dept_display else ""}
-
-        يرجى كتابة وصياغة الخطاب بالكامل من منظور هذا المستخدم وباسمه ومنصبه الرسمي بدقة شديدة ومخاطبة الجهة المستهدفة بالاحترام اللائق.
-        الخطاب يجب أن يحتوي على:
-        1. البداية (مثل: السيد العميد المحترم، أو السيد رئيس القسم المحترم، أو السيد مدير الجامعة المحترم، حسب فكرة المستخدم).
-        2. الموضوع مسطراً وواضحاً في المنتصف (مثل: الموضوع: طلب صيانة معمل).
-        3. متن الخطاب منسقاً ومنظماً وبليغاً جداً وبأرقام ونقاط واضحة ومقنعة.
-        4. الخاتمة وفقرة التوقيع باسم الموظف ووظيفته في الأسفل.
-
-        اكتب فقط نص الخطاب الإداري الرسمي مباشرة ولا تكتب أي مقدمات أو شروحات خارجية مثل "بالتأكيد" أو "تفضل الخطاب".
-        """
-        
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+        new_file = request.FILES.get('file')
+        if new_file:
+            correspondence.file = new_file
             
-            full_prompt = f"{system_instruction}\n\nفكرة الخطاب المطلوبة من المستخدم:\n{prompt}"
-            response = model.generate_content(full_prompt)
+        body_text = request.POST.get('body_text')
+        if body_text:
+            correspondence.body_text = body_text
             
-            return JsonResponse({'success': True, 'text': response.text})
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
-            
-    return JsonResponse({'success': False, 'error': 'طلب غير صالح.'})
+        correspondence.status = 'uploaded'
+        correspondence.return_reason = None
+        correspondence.save()
+        
+        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
+        return redirect('dashboard')
+        
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    
+    context = {
+        'correspondence': correspondence,
+        'users': users,
+        'external_entities': external_entities,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/edit_document.html', context)
 
 
 def user_logout(request):
