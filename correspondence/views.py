@@ -1,3 +1,5 @@
+import os
+import google.generativeai as genai
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -10,21 +12,22 @@ from django.db import transaction
 from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
+
 from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
+from .backup_utils import create_backup, apply_retention_policy
 
 # الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
 # الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
-# 1. لوحة التحكم الرئيسية مع الفلترة والسرية والمجلدات والعدادات الحية
+
 @login_required
 def dashboard(request):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -36,7 +39,6 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
-    # مصفوفة الرؤية والفرز الهرمي بالتمام والكمال
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -70,7 +72,7 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
-    # مجلدات الأرشيف الديناميكية الذكية
+    # مجلدات الأرشيف
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -108,12 +110,10 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
-    # حساب الإحصائيات الحية
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
 
-    # جلب الإشعارات النشطة غير المقروءة للمستخدم الحالي لعرضها بجرس التنبيهات
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -135,7 +135,7 @@ def dashboard(request):
         'total_count': total_count,
         'pending_count': pending_count,
         'archived_count': archived_count,
-        'active_notifications': active_notifications,  # تمرير الإشعارات للجرس
+        'active_notifications': active_notifications,
         'unread_notifications_count': unread_notifications_count,
     }
     return render(request, 'correspondence/dashboard.html', context)
@@ -211,7 +211,7 @@ def upload_document(request):
         with transaction.atomic():
             correspondence.save()
             
-            # 🔔 ميزة الفكرة 2: توليد إشعار تلقائي للشخص الأعلى مرتبة هرمياً فور الرفع
+            # إرسال إشعار للمستوى الإداري الأعلى
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
@@ -241,12 +241,132 @@ def upload_document(request):
 
 
 @login_required
+def edit_document(request, pk):
+    """تعديل وإعادة إرسال الخطاب المرتجع لتصحيح البيانات"""
+    correspondence = get_object_or_404(Correspondence, pk=pk)
+    user_profile = request.user.profile
+
+    # التحقق من أن المستخدم هو صاحب الخطاب الأصلي وأن الخطاب في حالة 'returned'
+    if correspondence.created_by != request.user or correspondence.status != 'returned':
+        messages.error(request, 'لا تملك صلاحية تعديل هذه المعاملة أو أنها ليست في حالة ارتجاع.')
+        return redirect('dashboard')
+
+    if request.method == 'POST':
+        subject = request.POST.get('subject')
+        direction = request.POST.get('direction')
+        scope = request.POST.get('scope')
+        addressed_to_type = request.POST.get('addressed_to_type')
+        document_file = request.FILES.get('file')
+        body_text = request.POST.get('body_text')
+
+        if not all([subject, direction, scope, addressed_to_type]):
+            messages.error(request, 'يرجى تعبئة الحقول الأساسية المطلوبة.')
+            return redirect('edit_document', pk=pk)
+
+        correspondence.subject = subject
+        correspondence.direction = direction
+        correspondence.scope = scope
+        correspondence.addressed_to_type = addressed_to_type
+        
+        if document_file:
+            correspondence.file = document_file
+            correspondence.body_text = None
+        elif body_text:
+            correspondence.body_text = body_text
+
+        correspondence.sender_internal_id = request.POST.get('sender_internal') or None
+        correspondence.sender_external_id = request.POST.get('sender_external') or None
+        correspondence.recipient_internal_id = request.POST.get('recipient_internal') or None
+        correspondence.recipient_external_id = request.POST.get('recipient_external') or None
+
+        # إعادة ضبط الحالة لمسار التدقيق من جديد
+        role = user_profile.role
+        if role == 'faculty_member':
+            correspondence.status = 'pending_hod'
+        elif role in ['student_registrar', 'exams_registrar']:
+            correspondence.status = 'pending_g_registrar'
+        else:
+            correspondence.status = 'pending_dean'
+
+        correspondence.return_reason = None  # تصفير سبب الإرجاع بعد المعالجة
+
+        try:
+            correspondence.full_clean()
+        except ValidationError as e:
+            messages.error(request, ' '.join(sum(e.message_dict.values(), [])))
+            return redirect('edit_document', pk=pk)
+
+        with transaction.atomic():
+            correspondence.save()
+
+            # إشعار المسؤول الأعلى بإعادة الرفع بعد التصحيح
+            notify_user = None
+            if role == 'faculty_member':
+                notify_user = User.objects.filter(profile__role='department_head', profile__department=user_profile.department).first()
+                text_msg = f"🔄 قام الأستاذ {request.user.username} بتصحيح وإعادة إرسال المعاملة: '{correspondence.subject}'."
+            elif role in ['student_registrar', 'exams_registrar']:
+                notify_user = User.objects.filter(profile__role='general_registrar').first()
+                text_msg = f"🔄 قام المسجل {request.user.username} بتصحيح وإعادة إرسال المعاملة: '{correspondence.subject}'."
+            else:
+                notify_user = User.objects.filter(profile__role='dean').first()
+                text_msg = f"🔄 تمت إعادة تقديم المعاملة المصححة للعمادة: '{correspondence.subject}'."
+
+            if notify_user:
+                Notification.objects.create(recipient=notify_user, text=text_msg, correspondence=correspondence)
+
+        messages.success(request, 'تم تعديل وإعادة إرسال المعاملة بنجاح إلى مسار التدقيق.')
+        return redirect('dashboard')
+
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    context = {
+        'correspondence': correspondence,
+        'users': users,
+        'external_entities': external_entities,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/edit_document.html', context)
+
+
+@login_required
+def generate_ai_letter(request):
+    """توليد صياغة رسمية للخطاب باستخدام Google Gemini AI"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'طلب غير مصرح به.'}, status=405)
+
+    prompt = request.POST.get('prompt', '').strip()
+    if not prompt:
+        return JsonResponse({'success': False, 'error': 'يرجى تقديم فكرة أو موضوع الخطاب.'})
+
+    api_key = getattr(settings, 'GOOGLE_API_KEY', '')
+    if not api_key:
+        return JsonResponse({'success': False, 'error': 'مفتاح GOOGLE_API_KEY غير مهيأ في إعدادات النظام.'})
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        system_instruction = (
+            "أنت مساعد إداري محترف في كلية علوم الحاسوب وتقانة المعلومات. "
+            "قم بصياغة خطاب إداري رسمي باللغة العربية الفصحى الرصينة، "
+            "يتضمن: البسملة، التحية الرسمية، متن الخطاب بأسلوب إداري دقيق، "
+            "والخاتمة الرسمية، بناءً على المعطيات التالية:\n"
+        )
+        
+        response = model.generate_content(system_instruction + prompt)
+        generated_text = response.text.strip()
+        return JsonResponse({'success': True, 'text': generated_text})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
+
+
+@login_required
 def document_detail(request, pk):
     user_profile = request.user.profile
     role = user_profile.role
     user = request.user
     
-    # سد ثغرة IDOR: جلب المعاملة فقط وحصرياً من نطاق رؤية الموظف المصرح له برمجياً لمنع التخمين العشوائي للروابط!
+    # حماية IDOR: استرجاع المعاملة من نطاق الرؤية المسموح به فقط
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -271,7 +391,6 @@ def document_detail(request, pk):
     correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
-    # قيد السرية الفائقة: يمنع نائب العميد والجميع من الاطلاع على الخطاب السري، مسموح فقط للعميد الفعلي والمنشئ والمسؤول المستهدف بالتنفيذ
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -318,7 +437,6 @@ def document_detail(request, pk):
                     correspondence.return_reason = return_reason
                     correspondence.save()
                     
-                    # 🔔 إنشاء تنبيه فوري أحمر لصاحب الخطاب يخبره بالرفض والسبب
                     Notification.objects.create(
                         recipient=correspondence.created_by,
                         text=f"⚠️ تم إرجاع خطابك '{correspondence.subject}' من قِبل {request.user.username} لتصحيح البيانات. السبب: {return_reason}",
@@ -345,7 +463,6 @@ def document_detail(request, pk):
                         correspondence.status = 'pending_dean'
                         correspondence.save()
                         
-                        # 🔔 تنبيه فوري للعميد بوجود معاملة موصى عليها بانتظاره
                         Notification.objects.create(
                             recipient=dean_user,
                             text=f"📨 تم اعتماد خطاب الأستاذ وإحالته إليكم بتوصية رئيس القسم: '{correspondence.subject}'.",
@@ -372,7 +489,6 @@ def document_detail(request, pk):
                         correspondence.status = 'pending_dean'
                         correspondence.save()
                         
-                        # 🔔 تنبيه فوري للعميد بوجود معاملة مدققة من المسجل العام بانتظاره
                         Notification.objects.create(
                             recipient=dean_user,
                             text=f"📨 تم اعتماد خطاب المسجل الفرعي وإحالته إليكم بعد تدقيق المسجل العام: '{correspondence.subject}'.",
@@ -410,7 +526,6 @@ def document_detail(request, pk):
                     correspondence.handled_at = timezone.now()
                     correspondence.save()
                     
-                    # 🔔 تنبيه داخلي فوري للموظف المستهدف يخبره بوجود توجيه جديد بانتظاره
                     Notification.objects.create(
                         recipient=assigned_to_user,
                         text=f"📨 تم توجيه معاملة جديدة إليك من قِبل السيد العميد: '{correspondence.subject}'.",
@@ -433,13 +548,11 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
-    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
     comments = correspondence.comments.all().order_by('created_at')
 
-    # جلب الإشعارات النشطة غير المقروءة للمستخدم لعرضها بجرس التنبيهات بالصفحة
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -500,7 +613,6 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# فيو لقراءة وتعليم التنبيه كـ مقروء والتحويل التلقائي للمعاملة المرتبطة
 @login_required
 def mark_notification_read(request, pk):
     notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
@@ -509,70 +621,10 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات والإشعارات يدوياً لمنع تضارب الـ migrations على ريندر
 def create_admin_bypass(request):
-    from .models import ExternalEntity, UserProfile, Comment, Notification
-    from django.db import connection
-    
-    # ⚙️ حيلة معزولة وآمنة لإنشاء الجداول في PostgreSQL يدوياً وبدون حظر المعاملة!
-    try:
-        with connection.cursor() as cursor:
-            # 1. إنشاء جدول التعليقات يدوياً وبشكل معزول
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS correspondence_comment (
-                        id SERIAL PRIMARY KEY,
-                        text TEXT NOT NULL,
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        author_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE,
-                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE
-                    );
-                """)
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
-            except Exception:
-                pass
-
-            # 2. إنشاء جدول الإشعارات يدوياً وبشكل معزول
-            try:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS correspondence_notification (
-                        id SERIAL PRIMARY KEY,
-                        text TEXT NOT NULL,
-                        is_read BOOLEAN NOT NULL DEFAULT FALSE,
-                        created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                        correspondence_id INTEGER NOT NULL REFERENCES correspondence_correspondence(id) ON DELETE CASCADE,
-                        recipient_id INTEGER NOT NULL REFERENCES auth_user(id) ON DELETE CASCADE
-                    );
-                """)
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
-                cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
-            except Exception:
-                pass
-
-            # 3. إضافة عمود سبب الارتجاع يدوياً وبشكل معزول
-            try:
-                cursor.execute("""
-                    ALTER TABLE correspondence_correspondence 
-                    ADD COLUMN IF NOT EXISTS return_reason TEXT;
-                """)
-            except Exception:
-                pass
-            
-            # 4. إضافة عمود السرية الفائقة يدوياً وبشكل معزول (الحل الحاسم والمحمي مئة بالمئة!)
-            try:
-                cursor.execute("""
-                    ALTER TABLE correspondence_correspondence 
-                    ADD COLUMN IF NOT EXISTS is_confidential BOOLEAN DEFAULT FALSE;
-                """)
-            except Exception:
-                pass
-                
-            table_success = True
-    except Exception as e:
-        table_success = False
-        error_msg = str(e)
-
+    """
+    دالة آمنة لزرع الحسابات التجريبية فقط إذا لم تكن موجودة.
+    """
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -601,14 +653,9 @@ def create_admin_bypass(request):
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
     ExternalEntity.objects.get_or_create(name='عمادة المكتبات المركزية', category='central_admin')
 
-    if table_success:
-        message = '✓ تم تهيئة قاعدة البيانات بنجاح وإنشاء جدول التعليقات والإشعارات بالـ SQL الصريح وتجهيز الحسابات! الباسورد الموحد هو (123)، والعميد حسابه (awab).'
-    else:
-        message = f'⚠️ تم تجهيز الحسابات ولكن فشل إنشاء الجداول يدوياً: {error_msg}'
-
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': message
+        'message_success': '✓ تم تجهيز الحسابات الأولية بنجاح! حساب العميد هو awab وكلمة المرور 123.'
     })
 
 
