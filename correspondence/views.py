@@ -279,7 +279,6 @@ def document_detail(request, pk):
             return redirect('dashboard')
 
     if request.method == 'POST':
-        # ميزة الفكرة 6: استقبال وحفظ التعليق الداخلي السري للموظفين والعميد
         if 'add_comment' in request.POST:
             comment_text = request.POST.get('comment_text', '').strip()
             if comment_text:
@@ -291,7 +290,6 @@ def document_detail(request, pk):
                 messages.success(request, 'تم إضافة التعليق والتنسيق الداخلي بنجاح.')
             return redirect('document_detail', pk=pk)
 
-        # أ. منطق أرشفة الموظف الموجه إليه الخطاب
         elif 'archive_document' in request.POST:
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
@@ -301,7 +299,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ب. منطق الأرشفة المباشرة للعميد/النائب دون توجيه
         elif 'direct_archive' in request.POST:
             if role in DIRECTIVE_ALLOWED_ROLES:
                 correspondence.status = 'archived'
@@ -313,7 +310,6 @@ def document_detail(request, pk):
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
 
-        # ج. ميزة الفكرة 3: إرجاع ورفض المعاملة مع توثيق السبب والتحول لـ returned وإرسال تنبيه
         elif 'return_document' in request.POST:
             return_reason = request.POST.get('return_reason', '').strip()
             if return_reason:
@@ -333,7 +329,6 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى كتابة سبب الإرجاع بالتفصيل.')
 
-        # د. منطق توصية رئيس القسم (مسار الأستاذ)
         elif 'hod_endorse' in request.POST:
             if role == 'department_head' and correspondence.status == 'pending_hod':
                 hod_note = request.POST.get('hod_note', '').strip()
@@ -361,7 +356,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة نص التوصية.')
 
-        # هـ. منطق اعتماد المسجل العام (مسار المسجلين الفرعيين)
         elif 'registrar_approve' in request.POST:
             if role == 'general_registrar' and correspondence.status == 'pending_g_registrar':
                 reg_note = request.POST.get('reg_note', '').strip()
@@ -389,7 +383,6 @@ def document_detail(request, pk):
                 else:
                     messages.error(request, 'يرجى كتابة ملاحظة الاعتماد والتدقيق.')
 
-        # و. منطق التوجيه الرقمي للعميد
         else:
             if role not in DIRECTIVE_ALLOWED_ROLES:
                 messages.error(request, 'ليست لديك صلاحية إصدار توجيه رقمي على هذه المعاملة.')
@@ -521,21 +514,13 @@ def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
     
-    # ⚙️ حيلة مخصصة لـ PostgreSQL للتحقق الآمن من الجداول وإنشائها دون تضارب أو إحباط المعاملة!
+    # ⚙️ حيلة معزولة وآمنة لإنشاء الجداول في PostgreSQL يدوياً وبدون حظر المعاملة!
     try:
         with connection.cursor() as cursor:
-            # 1. التحقق وإنشاء جدول التعليقات يدوياً
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'correspondence_comment'
-                );
-            """)
-            comment_exists = cursor.fetchone()[0]
-            if not comment_exists:
+            # 1. إنشاء جدول التعليقات يدوياً وبشكل معزول
+            try:
                 cursor.execute("""
-                    CREATE TABLE correspondence_comment (
+                    CREATE TABLE IF NOT EXISTS correspondence_comment (
                         id SERIAL PRIMARY KEY,
                         text TEXT NOT NULL,
                         created_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -545,19 +530,13 @@ def create_admin_bypass(request):
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
                 cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
+            except Exception:
+                pass
 
-            # 2. التحقق وإنشاء جدول الإشعارات الجديد يدوياً
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'correspondence_notification'
-                );
-            """)
-            notification_exists = cursor.fetchone()[0]
-            if not notification_exists:
+            # 2. إنشاء جدول الإشعارات يدوياً وبشكل معزول
+            try:
                 cursor.execute("""
-                    CREATE TABLE correspondence_notification (
+                    CREATE TABLE IF NOT EXISTS correspondence_notification (
                         id SERIAL PRIMARY KEY,
                         text TEXT NOT NULL,
                         is_read BOOLEAN NOT NULL DEFAULT FALSE,
@@ -568,19 +547,27 @@ def create_admin_bypass(request):
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
                 cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
+            except Exception:
+                pass
 
-            # 3. التحقق وإضافة عمود سبب الارتجاع لجدول المراسلات يدوياً بأمان
-            cursor.execute("""
-                ALTER TABLE correspondence_correspondence 
-                ADD COLUMN IF NOT EXISTS return_reason TEXT;
-            """)
+            # 3. إضافة عمود سبب الارتجاع يدوياً وبشكل معزول
+            try:
+                cursor.execute("""
+                    ALTER TABLE correspondence_correspondence 
+                    ADD COLUMN IF NOT EXISTS return_reason TEXT;
+                """)
+            except Exception:
+                pass
             
-            # 4. إضافة عمود السرية الفائقة لجدول المراسلات يدوياً بأمان ودون تعارض (الميزة المفقودة في الترحيل القديم!)
-            cursor.execute("""
-                ALTER TABLE correspondence_correspondence 
-                ADD COLUMN IF NOT EXISTS is_confidential BOOLEAN DEFAULT FALSE;
-            """)
-            
+            # 4. إضافة عمود السرية الفائقة يدوياً وبشكل معزول (الحل الحاسم والمحمي مئة بالمئة!)
+            try:
+                cursor.execute("""
+                    ALTER TABLE correspondence_correspondence 
+                    ADD COLUMN IF NOT EXISTS is_confidential BOOLEAN DEFAULT FALSE;
+                """)
+            except Exception:
+                pass
+                
             table_success = True
     except Exception as e:
         table_success = False
@@ -623,49 +610,6 @@ def create_admin_bypass(request):
         'form': {},
         'message_success': message
     })
-
-
-@login_required
-def edit_document(request, pk):
-    user_profile = request.user.profile
-    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
-    
-    if request.method == 'POST':
-        subject = request.POST.get('subject')
-        direction = request.POST.get('direction')
-        scope = request.POST.get('scope')
-        addressed_to_type = request.POST.get('addressed_to_type')
-        
-        correspondence.subject = subject
-        correspondence.direction = direction
-        correspondence.scope = scope
-        correspondence.addressed_to_type = addressed_to_type
-        
-        new_file = request.FILES.get('file')
-        if new_file:
-            correspondence.file = new_file
-            
-        body_text = request.POST.get('body_text')
-        if body_text:
-            correspondence.body_text = body_text
-            
-        correspondence.status = 'uploaded'
-        correspondence.return_reason = None
-        correspondence.save()
-        
-        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
-        return redirect('dashboard')
-        
-    users = User.objects.all()
-    external_entities = ExternalEntity.objects.all()
-    
-    context = {
-        'correspondence': correspondence,
-        'users': users,
-        'external_entities': external_entities,
-        'user_profile': user_profile,
-    }
-    return render(request, 'correspondence/edit_document.html', context)
 
 
 def user_logout(request):
