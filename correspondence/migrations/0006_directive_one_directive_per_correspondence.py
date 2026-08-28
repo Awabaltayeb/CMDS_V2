@@ -7,8 +7,8 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('correspondence', '0004_seed_reference_counters'),
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ('correspondence', '0005_comment'),  # جعلناه يعتمد على ملف الكومنت رقم 5 ليكون المسار متسلسلاً وسليماً
+    migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
