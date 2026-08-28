@@ -13,7 +13,6 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
 
-# استدعاء جميع النماذج بما فيها UserProfile
 from .models import (
     Correspondence,
     ExternalEntity,
@@ -24,12 +23,10 @@ from .models import (
 )
 from .backup_utils import create_backup, apply_retention_policy
 
-# الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
     'student_registrar', 'exams_registrar', 'faculty_member'
 ]
-# الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
 
@@ -39,7 +36,6 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
-    # فلترة السرية الفائقة
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -51,7 +47,6 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
-    # مصفوفة الرؤية الهرمية
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -85,7 +80,6 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
-    # مجلدات الأرشيف الذكية
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -97,7 +91,6 @@ def dashboard(request):
         elif folder == 'internal':
             correspondences = correspondences.filter(scope='internal')
 
-    # محرك البحث والفلترة
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -123,12 +116,10 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
-    # الإحصائيات
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
 
-    # الإشعارات
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -226,7 +217,6 @@ def upload_document(request):
         with transaction.atomic():
             correspondence.save()
             
-            # توليد إشعار فوري للمستوى الإداري الأعلى
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
@@ -293,7 +283,6 @@ def edit_document(request, pk):
         correspondence.recipient_internal_id = request.POST.get('recipient_internal') or None
         correspondence.recipient_external_id = request.POST.get('recipient_external') or None
 
-        # إعادة ضبط الحالة لمسار التدقيق
         role = user_profile.role
         if role == 'faculty_member':
             correspondence.status = 'pending_hod'
@@ -343,7 +332,7 @@ def edit_document(request, pk):
 
 @login_required
 def generate_ai_letter(request):
-    """توليد صياغة رسمية للخطاب باستخدام Google Gemini AI"""
+    """توليد صياغة رسمية للخطاب باستخدام Google Gemini AI مع دعم تلقائي للنماذج المتاحة"""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'طلب غير مصرح به.'}, status=405)
 
@@ -357,7 +346,6 @@ def generate_ai_letter(request):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
         
         system_instruction = (
             "أنت مساعد إداري محترف في كلية علوم الحاسوب وتقانة المعلومات. "
@@ -366,9 +354,33 @@ def generate_ai_letter(request):
             "والخاتمة الرسمية، بناءً على المعطيات التالية:\n"
         )
         
-        response = model.generate_content(system_instruction + prompt)
-        generated_text = response.text.strip()
-        return JsonResponse({'success': True, 'text': generated_text})
+        # قائمة النماذج المرتبة من الأحدث إلى الأوسع توافقاً
+        candidate_models = [
+            'gemini-2.0-flash',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro',
+            'gemini-pro',
+        ]
+        
+        response_text = None
+        last_error = None
+        
+        for model_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(model_name)
+                res = model.generate_content(system_instruction + prompt)
+                if res and res.text:
+                    response_text = res.text.strip()
+                    break
+            except Exception as err:
+                last_error = err
+                continue
+
+        if response_text:
+            return JsonResponse({'success': True, 'text': response_text})
+        else:
+            raise last_error or Exception("تعذر الاتصال بأي نموذج متاح.")
+
     except Exception as e:
         return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
 
@@ -379,7 +391,6 @@ def document_detail(request, pk):
     role = user_profile.role
     user = request.user
     
-    # حماية IDOR: جلب المعاملة من نطاق الرؤية المصرح به فقط
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -635,9 +646,6 @@ def mark_notification_read(request, pk):
 
 
 def create_admin_bypass(request):
-    """
-    دالة آمنة لزرع الحسابات التجريبية فقط إذا لم تكن موجودة.
-    """
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
