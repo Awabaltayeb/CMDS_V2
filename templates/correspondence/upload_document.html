@@ -109,8 +109,23 @@
                         <input type="file" name="file" class="form-control" id="file" accept=".pdf">
                     </div>
 
-                    <!-- ب. حقل كتابة الخطاب النصي (يُخفى عند اختيار PDF) -->
+                    <!-- ب. حقل كتابة الخطاب النصي المطور والمزود بالمساعد الذكي (يُخفى عند اختيار PDF) -->
                     <div class="col-md-12 mb-4 d-none" id="text_input_group">
+                        
+                        <!-- 🏛️ واجهة المساعد الإداري الذكي بـ Gemini AI المضافة حديثاً -->
+                        <div class="bg-light p-3 rounded border border-primary mb-3">
+                            <label for="ai_prompt" class="form-label small fw-bold text-primary"><i class="bi bi-cpu-fill"></i> مساعد الصياغة الإداري الذكي بالذكاء الاصطناعي (Gemini AI) ✨</label>
+                            <div class="input-group input-group-sm mb-2">
+                                <input type="text" id="ai_prompt" class="form-control" placeholder="اكتب فكرة الخطاب باختصار هنا (مثال: طلب زيادة رواتب الموظفين مع تبيين غلاء المعيشة)...">
+                                <button type="button" class="btn btn-primary fw-bold" onclick="generateAILetter()">صياغة الخطاب بالـ AI <i class="bi bi-magic"></i></button>
+                            </div>
+                            <!-- مؤشر التحميل الدوار للطلبات الصامتة -->
+                            <div id="ai_spinner" class="text-center d-none py-2">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span class="small text-primary ms-1">جاري صياغة الخطاب الإداري بالذكاء الاصطناعي بذكاء، يرجى الانتظار...</span>
+                            </div>
+                        </div>
+
                         <label for="body_text" class="form-label small fw-bold">نص وصياغة الخطاب الرسمي:</label>
                         <textarea name="body_text" class="form-control" id="body_text" rows="8" placeholder="اكتب نص الخطاب الرسمي المعتمد هنا بالتفصيل..."></textarea>
                     </div>
@@ -171,7 +186,7 @@
         </div>
     </div>
 
-    <!-- كود جافاسكربت الديناميكي للتبديل السريع في الهاتف -->
+    <!-- كود جافاسكربت الديناميكي للتبديل السريع في الهاتف والطلب الصامت للذكاء الاصطناعي -->
     <script>
         function toggleInputType() {
             var isPdf = document.getElementById('type_pdf').checked;
@@ -192,6 +207,51 @@
                 textInput.setAttribute('required', 'required');
             }
         }
+        
+        // 🔮 دالة جلب صياغة المعاملة صامتاً بالذكاء الاصطناعي وحقنها في الـ Textarea فوراُ
+        function generateAILetter() {
+            var prompt = document.getElementById('ai_prompt').value.trim();
+            var spinner = document.getElementById('ai_spinner');
+            var textarea = document.getElementById('body_text');
+            
+            if (!prompt) {
+                alert('يرجى كتابة فكرة الخطاب باختصار أولاً ليقوم المساعد الذكي بصياغتها.');
+                return;
+            }
+            
+            spinner.classList.remove('d-none');
+            textarea.setAttribute('readonly', 'readonly');
+            
+            // جلب التوكن الخاص بحماية دجانغو للمدخلات
+            var csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+            
+            var formData = new FormData();
+            formData.append('prompt', prompt);
+            
+            fetch("{% url 'generate_ai_letter' %}", {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                spinner.classList.add('d-none');
+                textarea.removeAttribute('readonly');
+                if (data.success) {
+                    textarea.value = data.text;
+                } else {
+                    alert(data.error);
+                }
+            })
+            .catch(error => {
+                spinner.classList.add('d-none');
+                textarea.removeAttribute('readonly');
+                alert('حدث خطأ أثناء الاتصال بالذكاء الاصطناعي: ' + error);
+            });
+        }
+
         window.onload = toggleInputType;
     </script>
 </body>
