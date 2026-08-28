@@ -7,14 +7,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.db import transaction
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, JsonResponse  # استدعاء JsonResponse للطلب الصامت
 from django.utils import timezone
 from django.core.mail import send_mail
-from .models import Correspondence, ExternalEntity, Directive, Comment, Notification, ReferenceCounter
+import google.generativeai as genai  # استدعاء مكتبة الذكاء الاصطناعي لجوجل
+from .models import Correspondence, ExternalEntity, Directive, Comment, Notification
 
-# الأدوار المسموح لها بالرفع 
 UPLOAD_ALLOWED_ROLES = ['secretary', 'dean', 'vice_dean', 'general_registrar', 'student_registrar', 'exams_registrar', 'faculty_member']
-# الأدوار المسموح لها بإصدار توجيه رقمي 
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
 @login_required
@@ -23,7 +22,6 @@ def dashboard(request):
     role = user_profile.role
     user = request.user
     
-    # تطبيق السرية الفائقة: العميد الفعلي يرى كل شيء. نائب العميد وبقية الموظفين لا يريانه إلا لو كانوا هم المنشئين له
     if role == 'dean':
         base_query = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -35,7 +33,6 @@ def dashboard(request):
             Q(is_confidential=False) | Q(created_by=user)
         )
 
-    # مصفوفة الرؤية والفرز الهرمي بالتمام والكمال
     if role == 'secretary':
         correspondences = base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
@@ -69,7 +66,6 @@ def dashboard(request):
             Q(created_by=user) | Q(directives__assigned_to=user)
         ).distinct().order_by('-created_at')
 
-    # مجلدات الأرشيف الديناميكية الذكية
     folder = request.GET.get('folder', '')
     if folder:
         if folder in ['cs', 'it', 'is']:
@@ -81,7 +77,6 @@ def dashboard(request):
         elif folder == 'internal':
             correspondences = correspondences.filter(scope='internal')
 
-    # محرك البحث والفلترة
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '')
     direction_filter = request.GET.get('direction', '')
@@ -107,12 +102,10 @@ def dashboard(request):
     if date_to:
         correspondences = correspondences.filter(document_date__lte=date_to)
 
-    # حساب الإحصائيات الحية
     total_count = correspondences.count()
     pending_count = correspondences.filter(status__in=['pending_hod', 'pending_g_registrar', 'pending_dean']).count()
     archived_count = correspondences.filter(status='archived').count()
 
-    # جلب الإشعارات النشطة غير المقروءة للمستخدم الحالي لعرضها بجرس التنبيهات
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -210,7 +203,6 @@ def upload_document(request):
         with transaction.atomic():
             correspondence.save()
             
-            # 🔔 ميزة الفكرة 2: توليد إشعار تلقائي للشخص الأعلى مرتبة هرمياً فور الرفع
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
@@ -245,7 +237,6 @@ def document_detail(request, pk):
     role = user_profile.role
     user = request.user
     
-    # سد ثغرة IDOR
     if role == 'dean':
         allowed_queryset = Correspondence.objects.all()
     elif role == 'vice_dean':
@@ -270,7 +261,6 @@ def document_detail(request, pk):
     correspondence = get_object_or_404(allowed_queryset.distinct(), pk=pk)
     existing_directive = correspondence.directives.first()
     
-    # قيد السرية الفائقة
     if correspondence.is_confidential and role != 'dean' and correspondence.created_by != user:
         is_assigned = existing_directive and existing_directive.assigned_to == user
         if not is_assigned:
@@ -317,7 +307,6 @@ def document_detail(request, pk):
                     correspondence.return_reason = return_reason
                     correspondence.save()
                     
-                    # 🔔 إنشاء تنبيه فوري أحمر لصاحب الخطاب يخبره بالرفض والسبب
                     Notification.objects.create(
                         recipient=correspondence.created_by,
                         text=f"⚠️ تم إرجاع خطابك '{correspondence.subject}' من قِبل {request.user.username} لتصحيح البيانات. السبب: {return_reason}",
@@ -344,7 +333,6 @@ def document_detail(request, pk):
                         correspondence.status = 'pending_dean'
                         correspondence.save()
                         
-                        # 🔔 تنبيه فوري للعميد بوجود معاملة موصى عليها بانتظاره
                         Notification.objects.create(
                             recipient=dean_user,
                             text=f"📨 تم اعتماد خطاب الأستاذ وإحالته إليكم بتوصية رئيس القسم: '{correspondence.subject}'.",
@@ -371,7 +359,6 @@ def document_detail(request, pk):
                         correspondence.status = 'pending_dean'
                         correspondence.save()
                         
-                        # 🔔 تنبيه فوري للعميد بوجود معاملة مدققة من المسجل العام بانتظاره
                         Notification.objects.create(
                             recipient=dean_user,
                             text=f"📨 تم اعتماد خطاب المسجل الفرعي وإحالته إليكم بعد تدقيق المسجل العام: '{correspondence.subject}'.",
@@ -409,7 +396,6 @@ def document_detail(request, pk):
                     correspondence.handled_at = timezone.now()
                     correspondence.save()
                     
-                    # 🔔 تنبيه داخلي فوري للموظف المستهدف يخبره بوجود توجيه جديد بانتظاره
                     Notification.objects.create(
                         recipient=assigned_to_user,
                         text=f"📨 تم توجيه معاملة جديدة إليك من قِبل السيد العميد: '{correspondence.subject}'.",
@@ -432,13 +418,11 @@ def document_detail(request, pk):
             else:
                 messages.error(request, 'يرجى اختيار الموظف المستهدف وكتابة نص التوجيه.')
 
-    # جلب التوجيهات الصادرة والواردة بشكل مفصل لعرضها بالصفحة
     hod_directive = correspondence.directives.filter(issued_by__profile__role='department_head').first()
     reg_directive = correspondence.directives.filter(issued_by__profile__role='general_registrar').first()
     dean_directive = correspondence.directives.filter(issued_by__profile__role__in=['dean', 'vice_dean']).first()
     comments = correspondence.comments.all().order_by('created_at')
 
-    # جلب الإشعارات النشطة غير المقروءة للمستخدم لعرضها بجرس التنبيهات بالصفحة
     active_notifications = user.notifications.filter(is_read=False).order_by('-created_at')[:5]
     unread_notifications_count = user.notifications.filter(is_read=False).count()
 
@@ -456,54 +440,6 @@ def document_detail(request, pk):
         'unread_notifications_count': unread_notifications_count,
     }
     return render(request, 'correspondence/document_detail.html', context)
-
-
-# 3-ب. واجهة تعديل وإعادة صياغة الخطاب المرتجع
-@login_required
-def edit_document(request, pk):
-    user_profile = request.user.profile
-    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
-    
-    if request.method == 'POST':
-        subject = request.POST.get('subject')
-        direction = request.POST.get('direction')
-        scope = request.POST.get('scope')
-        addressed_to_type = request.POST.get('addressed_to_type')
-        
-        # تحديث البيانات الأساسية
-        correspondence.subject = subject
-        correspondence.direction = direction
-        correspondence.scope = scope
-        correspondence.addressed_to_type = addressed_to_type
-        
-        # تحديث الملف إذا تم رفع ملف جديد
-        new_file = request.FILES.get('file')
-        if new_file:
-            correspondence.file = new_file
-            
-        # تحديث النص إذا تم كتابة نص جديد
-        body_text = request.POST.get('body_text')
-        if body_text:
-            correspondence.body_text = body_text
-            
-        # إعادة صياغة الخطاب تصفّر حالة الارتجاع والسبب وترجعه للمسار الهرمي التلقائي
-        correspondence.status = 'uploaded'
-        correspondence.return_reason = None
-        correspondence.save()
-        
-        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
-        return redirect('dashboard')
-        
-    users = User.objects.all()
-    external_entities = ExternalEntity.objects.all()
-    
-    context = {
-        'correspondence': correspondence,
-        'users': users,
-        'external_entities': external_entities,
-        'user_profile': user_profile,
-    }
-    return render(request, 'correspondence/edit_document.html', context)
 
 
 @login_required
@@ -547,7 +483,6 @@ def serve_protected_media(request, filename):
     raise Http404("المستند غير موجود على السيرفر.")
 
 
-# فيو لقراءة وتعليم التنبيه كـ مقروء والتحويل التلقائي للمعاملة المرتبطة
 @login_required
 def mark_notification_read(request, pk):
     notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
@@ -556,15 +491,106 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
-# دالة زرع البيانات وتجهيز الحسابات مع إنشاء جدول التعليقات يدوياً بطريقة آمنة ومخصصة لـ PostgreSQL
+@login_required
+def edit_document(request, pk):
+    user_profile = request.user.profile
+    correspondence = get_object_or_404(Correspondence, pk=pk, created_by=request.user, status='returned')
+    
+    if request.method == 'POST':
+        subject = request.POST.get('subject')
+        direction = request.POST.get('direction')
+        scope = request.POST.get('scope')
+        addressed_to_type = request.POST.get('addressed_to_type')
+        
+        correspondence.subject = subject
+        correspondence.direction = direction
+        correspondence.scope = scope
+        correspondence.addressed_to_type = addressed_to_type
+        
+        new_file = request.FILES.get('file')
+        if new_file:
+            correspondence.file = new_file
+            
+        body_text = request.POST.get('body_text')
+        if body_text:
+            correspondence.body_text = body_text
+            
+        correspondence.status = 'uploaded'
+        correspondence.return_reason = None
+        correspondence.save()
+        
+        messages.success(request, 'تمت إعادة صياغة وتعديل الخطاب بنجاح وإرساله للمراجعة.')
+        return redirect('dashboard')
+        
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    
+    context = {
+        'correspondence': correspondence,
+        'users': users,
+        'external_entities': external_entities,
+        'user_profile': user_profile,
+    }
+    return render(request, 'correspondence/edit_document.html', context)
+
+
+# 💡 فيو معالجة وتوليد الخطاب بالذكاء الاصطناعي (Gemini AI) المضاف حديثاً (ميزة الفكرة الجديدة)
+@login_required
+def generate_ai_letter(request):
+    if request.method == 'POST':
+        prompt = request.POST.get('prompt', '').strip()
+        if not prompt:
+            return JsonResponse({'success': False, 'error': 'يرجى كتابة فكرة الخطاب أولاً.'})
+        
+        api_key = getattr(settings, 'GOOGLE_API_KEY', '')
+        if not api_key:
+            return JsonResponse({'success': False, 'error': 'لم يتم تكوين مفتاح الأمان للذكاء الاصطناعي (GOOGLE_API_KEY) في السيرفر.'})
+        
+        user = request.user
+        user_profile = user.profile
+        role_display = user_profile.get_role_display()
+        dept_display = user_profile.get_department_display() if user_profile.department else ""
+        
+        # 🤖 صياغة الأمر الإداري الهرمي والذكي الديناميكي بالتمام والكمال
+        system_instruction = f"""
+        أنت مساعد ذكاء اصطناعي إداري ذكي ومحترف، تعمل في كلية علوم الحاسوب وتقانة المعلومات بجامعة العلوم والتكنولوجيا حقتنا.
+        وظيفتك هي صياغة خطابات ومراسلات رسمية بليغة باللغة العربية الفصحى وبأعلى درجات التنسيق الإداري المعتمد في السودان.
+
+        المستخدم الحالي للنظام والذي يريد منك كتابة هذا الخطاب هو:
+        - الاسم: {user.username}
+        - المنصب/الوظيفة في الكلية: {role_display}
+        {"- القسم الأكاديمي: " + dept_display if dept_display else ""}
+
+        يرجى كتابة وصياغة الخطاب بالكامل من منظور هذا المستخدم وباسمه ومنصبه الرسمي بدقة شديدة ومخاطبة الجهة المستهدفة بالاحترام اللائق.
+        الخطاب يجب أن يحتوي على:
+        1. البداية (مثل: السيد العميد المحترم، أو السيد رئيس القسم المحترم، أو السيد مدير الجامعة المحترم، حسب فكرة المستخدم).
+        2. الموضوع مسطراً وواضحاً في المنتصف (مثل: الموضوع: طلب صيانة معمل).
+        3. متن الخطاب منسقاً ومنظماً وبليغاً جداً وبأرقام ونقاط واضحة ومقنعة.
+        4. الخاتمة وفقرة التوقيع باسم الموظف ووظيفته في الأسفل.
+
+        اكتب فقط نص الخطاب الإداري الرسمي مباشرة ولا تكتب أي مقدمات أو شروحات خارجية مثل "بالتأكيد" أو "تفضل الخطاب".
+        """
+        
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            
+            full_prompt = f"{system_instruction}\n\nفكرة الخطاب المطلوبة من المستخدم:\n{prompt}"
+            response = model.generate_content(full_prompt)
+            
+            return JsonResponse({'success': True, 'text': response.text})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
+            
+    return JsonResponse({'success': False, 'error': 'طلب غير صالح.'})
+
+
 def create_admin_bypass(request):
     from .models import ExternalEntity, UserProfile, Comment, Notification
     from django.db import connection
     
-    # ⚙️ حيلة ذكية وآمنة لإنشاء الجداول الجديدة يدوياً لمنع تضارب الـ migrations على ريندر
     try:
         with connection.cursor() as cursor:
-            # 1. إنشاء جدول التعليقات
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS correspondence_comment (
                     id SERIAL PRIMARY KEY,
@@ -577,7 +603,6 @@ def create_admin_bypass(request):
             cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_author_id_idx ON correspondence_comment(author_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_comment_correspondence_id_idx ON correspondence_comment(correspondence_id);")
             
-            # 2. إنشاء جدول الإشعارات الجديد يدوياً
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS correspondence_notification (
                     id SERIAL PRIMARY KEY,
@@ -591,7 +616,6 @@ def create_admin_bypass(request):
             cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_recipient_id_idx ON correspondence_notification(recipient_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS correspondence_notif_correspondence_id_idx ON correspondence_notification(correspondence_id);")
 
-            # 3. إضافة عمود سبب الارتجاع لجدول المراسلات يدوياً بأمان ودون تعارض
             cursor.execute("""
                 ALTER TABLE correspondence_correspondence 
                 ADD COLUMN IF NOT EXISTS return_reason TEXT;
