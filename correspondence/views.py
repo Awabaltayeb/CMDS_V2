@@ -247,7 +247,6 @@ def upload_document(request):
 
 @login_required
 def edit_document(request, pk):
-    """تعديل وإعادة إرسال الخطاب المرتجع لتصحيح البيانات"""
     correspondence = get_object_or_404(Correspondence, pk=pk)
     user_profile = request.user.profile
 
@@ -332,7 +331,7 @@ def edit_document(request, pk):
 
 @login_required
 def generate_ai_letter(request):
-    """توليد صياغة رسمية للخطاب باستخدام Google Gemini AI مع دعم تلقائي للنماذج المتاحة"""
+    """توليد صياغة رسمية للخطاب مع اكتشاف النموذج المتاح في حسابك تلقائياً"""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'طلب غير مصرح به.'}, status=405)
 
@@ -354,32 +353,27 @@ def generate_ai_letter(request):
             "والخاتمة الرسمية، بناءً على المعطيات التالية:\n"
         )
         
-        # قائمة النماذج المرتبة من الأحدث إلى الأوسع توافقاً
-        candidate_models = [
-            'gemini-2.0-flash',
-            'gemini-1.5-flash-latest',
-            'gemini-1.5-pro',
-            'gemini-pro',
-        ]
-        
-        response_text = None
-        last_error = None
-        
-        for model_name in candidate_models:
-            try:
-                model = genai.GenerativeModel(model_name)
-                res = model.generate_content(system_instruction + prompt)
-                if res and res.text:
-                    response_text = res.text.strip()
-                    break
-            except Exception as err:
-                last_error = err
-                continue
+        # جلب قائمة النماذج المفعلة فعلياً في حساب Google AI Studio الخاص بك
+        target_model = None
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    if 'flash' in m.name or 'pro' in m.name:
+                        target_model = m.name
+                        break
+        except Exception:
+            pass
+            
+        if not target_model:
+            target_model = 'models/gemini-1.5-flash'
 
-        if response_text:
-            return JsonResponse({'success': True, 'text': response_text})
+        model = genai.GenerativeModel(target_model)
+        response = model.generate_content(system_instruction + prompt)
+        
+        if response and response.text:
+            return JsonResponse({'success': True, 'text': response.text.strip()})
         else:
-            raise last_error or Exception("تعذر الاتصال بأي نموذج متاح.")
+            return JsonResponse({'success': False, 'error': 'لم يتم استلام نص من النموذج.'})
 
     except Exception as e:
         return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
