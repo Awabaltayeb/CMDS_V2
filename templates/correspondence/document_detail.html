@@ -8,33 +8,46 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    {% load static %}
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .navbar { background-color: #2b3e50 !important; }
         .card-custom { border: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .pdf-container { height: 500px; width: 100%; border: 1px solid #ddd; border-radius: 8px; }
         
+        /* تصميم الترويسة والبرواز الرسمي الأكاديمي المروّس */
         .official-letterhead {
             background-color: #ffffff;
-            border: 3px double #333333;
-            border-radius: 8px;
-            padding: 30px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-            min-height: 500px;
-            color: #333333;
+            border: 3px double #1a252f;
+            border-radius: 6px;
+            padding: 35px 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+            min-height: 550px;
+            color: #222222;
+            position: relative;
         }
         .letterhead-header {
-            text-align: center;
-            border-bottom: 2px solid #333333;
+            border-bottom: 2px solid #1a252f;
             padding-bottom: 15px;
             margin-bottom: 25px;
         }
+        .college-logo-img {
+            max-height: 90px;
+            max-width: 90px;
+            object-fit: contain;
+        }
         .letterhead-body {
-            font-size: 1.1rem;
-            line-height: 1.8;
+            font-size: 1.15rem;
+            line-height: 2.0;
             text-align: justify;
             white-space: pre-line;
             min-height: 250px;
+            color: #111111;
+        }
+        .letterhead-footer {
+            border-top: 1px dashed #cccccc;
+            padding-top: 15px;
+            margin-top: 30px;
         }
         
         .comments-box {
@@ -53,11 +66,26 @@
             border-bottom: none;
             padding-bottom: 0;
         }
+
+        /* تنسيق مخصص للطباعة فقط */
+        @media print {
+            body * { visibility: hidden; }
+            .official-letterhead, .official-letterhead * { visibility: visible; }
+            .official-letterhead {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                border: 2px solid #000;
+                box-shadow: none;
+            }
+            .no-print { display: none !important; }
+        }
     </style>
 </head>
 <body>
     <!-- شريط الملاحة العلوي -->
-    <nav class="navbar navbar-dark bg-dark mb-4">
+    <nav class="navbar navbar-dark bg-dark mb-4 no-print">
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1"><i class="bi bi-envelope-open-fill me-2"></i> نظام CDMS</span>
             <div class="d-flex align-items-center text-white">
@@ -71,12 +99,12 @@
     <div class="container mb-5">
         {% if messages %}
             {% for message in messages %}
-                <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2">{{ message }}</div>
+                <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} py-2 no-print">{{ message }}</div>
             {% endfor %}
         {% endif %}
 
         <!-- شريط التقدم المرئي لمتابعة مسار المعاملة -->
-        <div class="card card-custom p-3 mb-4 bg-white">
+        <div class="card card-custom p-3 mb-4 bg-white no-print">
             <div class="d-flex flex-wrap justify-content-between align-items-center text-center gap-2">
                 <span class="small fw-bold text-muted"><i class="bi bi-bezier2"></i> مسار المعاملة الحركي:</span>
                 
@@ -123,16 +151,22 @@
         </div>
 
         <div class="row">
-            <!-- اليمين: بيانات الخطاب والـ PDF الرئيسي -->
+            <!-- اليمين: بيانات الخطاب والـ PDF / الخطاب المروّس -->
             <div class="col-lg-7 mb-4">
                 <div class="card card-custom p-4 h-100">
-                    <h5 class="fw-bold text-primary mb-3">
-                        <i class="bi bi-file-earmark-text-fill"></i> تفاصيل المراسلة الرسمية
-                        {% if correspondence.is_confidential %}
-                            <span class="badge bg-danger ms-2"><i class="bi bi-shield-lock-fill"></i> سري للغاية 🔒</span>
+                    <div class="d-flex justify-content-between align-items-center mb-3 no-print">
+                        <h5 class="fw-bold text-primary mb-0">
+                            <i class="bi bi-file-earmark-text-fill"></i> تفاصيل المراسلة الرسمية
+                            {% if correspondence.is_confidential %}
+                                <span class="badge bg-danger ms-2"><i class="bi bi-shield-lock-fill"></i> سري للغاية 🔒</span>
+                            {% endif %}
+                        </h5>
+                        {% if not correspondence.file %}
+                            <button onclick="window.print()" class="btn btn-sm btn-outline-dark fw-bold"><i class="bi bi-printer-fill"></i> طباعة الخطاب المروّس</button>
                         {% endif %}
-                    </h5>
-                    <table class="table table-bordered small mb-4">
+                    </div>
+
+                    <table class="table table-bordered small mb-4 no-print">
                         <tr>
                             <th class="table-light w-25">الرقم المرجعي</th>
                             <td class="fw-bold text-secondary">{{ correspondence.reference_number }}</td>
@@ -166,35 +200,58 @@
                         </tr>
                     </table>
 
-                    <h6 class="fw-bold text-secondary mb-2"><i class="bi bi-file-earmark-pdf-fill"></i> محتوى ومستند المعاملة:</h6>
+                    <h6 class="fw-bold text-secondary mb-2 no-print"><i class="bi bi-file-earmark-pdf-fill"></i> مستند المعاملة الرسمي:</h6>
                     
                     {% if correspondence.is_confidential and user_profile.role != 'dean' and correspondence.created_by != request.user %}
-                        <div class="alert alert-warning border-0 p-4 text-center my-3 fw-bold">
+                        <div class="alert alert-warning border-0 p-4 text-center my-3 fw-bold no-print">
                             <i class="bi bi-eye-slash-fill fs-2"></i><br>
                             تم حجب عرض محتوى الخطاب لسرية وخصوصية الخطاب الفائقة.<br>
-                            مسموح لك فقط باتخاذ الإجراء الإداري وتمرير المعاملة للمستوى الأعلى [1].
+                            مسموح لك فقط باتخاذ الإجراء الإداري وتمرير المعاملة للمستوى الأعلى.
                         </div>
                     {% else %}
                         {% if correspondence.file %}
                             <iframe src="{{ correspondence.file.url }}" class="pdf-container"></iframe>
                         {% else %}
+                            <!-- 🏛️ البرواز والترويسة الرسمية المدمجة مع شعار جامعة البطانة -->
                             <div class="official-letterhead">
                                 <div class="letterhead-header">
-                                    <h5 class="fw-bold mb-1">جامعة العلوم والتكنولوجيا حقتنا</h5>
-                                    <h6 class="fw-bold text-primary mb-1">كلية علوم الحاسوب وتقانة المعلومات</h6>
-                                    <span class="small text-muted">مكتب: {{ correspondence.created_by.profile.get_role_display }}</span>
+                                    <div class="row align-items-center">
+                                        <div class="col-3 text-start">
+                                            <img src="{% static 'images/logo.png' %}" alt="شعار كلية علوم الحاسوب" class="college-logo-img" onerror="this.src='https://cdn-icons-png.flaticon.com/512/2997/2997295.png'">
+                                        </div>
+                                        <div class="col-6 text-center">
+                                            <p class="small text-muted mb-0">جمهورية السودان</p>
+                                            <h5 class="fw-bold mb-1 text-dark">جامعة البطانة</h5>
+                                            <h6 class="fw-bold text-primary mb-1">كلية علوم الحاسوب وتقانة المعلومات</h6>
+                                            <span class="badge bg-light text-dark border small">مكتب: {{ correspondence.created_by.profile.get_role_display }}</span>
+                                        </div>
+                                        <div class="col-3 text-end small text-muted">
+                                            <div><strong>التاريخ:</strong> {{ correspondence.document_date }}</div>
+                                            <div><strong>الرقم:</strong> {{ correspondence.reference_number }}</div>
+                                            {% if correspondence.is_confidential %}
+                                                <div class="text-danger fw-bold mt-1">🔒 سري للغاية</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="d-flex justify-content-between small text-muted mb-4">
-                                    <span>الرقم المرجعي: <strong>{{ correspondence.reference_number }}</strong></span>
-                                    <span>التاريخ: {{ correspondence.document_date }}</span>
-                                </div>
+
                                 <div class="text-center my-4">
                                     <h5 class="fw-bold text-dark"><u>الموضوع: {{ correspondence.subject }}</u></h5>
                                 </div>
-                                <div class="letterhead-body">{{ correspondence.body_text }}</div>
-                                <div class="text-start mt-4 pe-4">
-                                    <p class="fw-bold mb-1">{{ correspondence.created_by.username }}</p>
-                                    <span class="small text-muted">{{ correspondence.created_by.profile.get_role_display }}</span>
+
+                                <div class="letterhead-body">
+                                    {{ correspondence.body_text }}
+                                </div>
+
+                                <div class="letterhead-footer d-flex justify-content-between align-items-end mt-4">
+                                    <div class="small text-muted">
+                                        <em>صدر عبر النظام الإلكتروني للمراسلات (CDMS)</em>
+                                    </div>
+                                    <div class="text-center pe-3">
+                                        <p class="fw-bold mb-0">{{ correspondence.created_by.username }}</p>
+                                        <span class="small text-muted">{{ correspondence.created_by.profile.get_role_display }}</span>
+                                        <div class="text-muted small mt-1">التوقيع الإلكتروني معتمد ✓</div>
+                                    </div>
                                 </div>
                             </div>
                         {% endif %}
@@ -203,17 +260,15 @@
             </div>
 
             <!-- اليسار: التوجيهات والقرارات والمسارات الهرمية المحدثة -->
-            <div class="col-lg-5 mb-4 d-flex flex-column gap-3">
+            <div class="col-lg-5 mb-4 d-flex flex-column gap-3 no-print">
                 <div class="card card-custom p-4 flex-grow-1">
                     <h5 class="fw-bold text-primary mb-4"><i class="bi bi-shield-check"></i> التوجيهات والقرارات الرقمية</h5>
 
-                    <!-- ⚠️ بطاقة الارتجاع والتصحيح باللون الأحمر (ميزة الفكرة 3) -->
                     {% if correspondence.status == 'returned' %}
                         <div class="alert alert-danger border-0 p-4 mb-3">
                             <h6 class="fw-bold text-danger mb-2"><i class="bi bi-exclamation-triangle-fill"></i> تم إرجاع المعاملة لتصحيح البيانات:</h6>
                             <p class="mb-3 lead small">{{ correspondence.return_reason }}</p>
                             
-                            <!-- زر إعادة صياغة الخطاب يظهر فقط لمنشئ الخطاب الأصلي لتعديله وإرساله -->
                             {% if correspondence.created_by == request.user %}
                                 <a href="{% url 'edit_document' correspondence.id %}" class="btn btn-warning w-100 py-2 fw-bold text-dark"><i class="bi bi-pencil-square"></i> إعادة صياغة وإرسال الخطاب</a>
                             {% endif %}
@@ -248,7 +303,6 @@
                             </div>
                         </div>
 
-                        <!-- زر التنفيذ والأرشفة للموظف المستهدف فقط إذا كانت المعاملة بحالة "موجه" -->
                         {% if correspondence.status == 'assigned' and dean_directive.assigned_to == request.user %}
                             <form method="post" class="mt-3">
                                 {% csrf_token %}
@@ -263,7 +317,7 @@
                         </div>
                     {% endif %}
 
-                    <!-- النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري الفعلي -->
+                    <!-- النماذج الحركية الديناميكية الموجهة حسب الحالة والدور الإداري -->
                     {% if not existing_directive and correspondence.status != 'returned' %}
                         
                         <!-- 1. نموذج رئيس القسم -->
@@ -277,7 +331,6 @@
                                 <button type="submit" name="hod_endorse" class="btn btn-success w-100 py-2 fw-bold mb-2"><i class="bi bi-send-check-fill"></i> اعتماد التوصية والإحالة للعميد</button>
                             </form>
 
-                            <!-- زر الارتجاع والرفض لرئيس القسم مع تبيين السبب -->
                             <form method="post" class="mt-2">
                                 {% csrf_token %}
                                 <div class="mb-2">
@@ -297,7 +350,6 @@
                                 <button type="submit" name="registrar_approve" class="btn btn-success w-100 py-2 fw-bold mb-2"><i class="bi bi-send-check-fill"></i> اعتماد الخطاب والإحالة للعميد</button>
                             </form>
 
-                            <!-- زر الارتجاع والرفض للمسجل العام مع تبيين السبب -->
                             <form method="post" class="mt-2">
                                 {% csrf_token %}
                                 <div class="mb-2">
@@ -328,7 +380,6 @@
                                 <button type="submit" class="btn btn-primary w-100 py-2 fw-bold mb-2"><i class="bi bi-send-fill"></i> اعتماد التوجيه وإرسال المعاملة</button>
                             </form>
 
-                            <!-- زر الارتجاع والرفض للعميد/النائب مع تبيين السبب ليرجع لمنشئه الأصلي للتصحيح -->
                             <form method="post" class="mt-2">
                                 {% csrf_token %}
                                 <div class="mb-2">
@@ -339,7 +390,6 @@
 
                             <hr class="my-4 text-muted">
                             
-                            <!-- زر الأرشفة الفورية المباشرة للعميد -->
                             <form method="post" action="">
                                 {% csrf_token %}
                                 <button type="submit" name="direct_archive" class="btn btn-outline-success w-100 py-2 fw-bold"><i class="bi bi-archive-fill"></i> أرشفة المعاملة مباشرة (دون توجيه)</button>
@@ -355,7 +405,7 @@
                     {% endif %}
                 </div>
 
-                <!-- 💬 ميزة الفكرة 6: صندوق النقاش والتنسيق السري الداخلي للخطاب -->
+                <!-- صندوق النقاش والتنسيق السري الداخلي للخطاب -->
                 <div class="card card-custom p-4">
                     <h5 class="fw-bold text-secondary mb-3"><i class="bi bi-chat-dots-fill text-primary"></i> نقاش وتنسيق داخلي سري</h5>
                     
