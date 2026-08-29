@@ -331,7 +331,7 @@ def edit_document(request, pk):
 
 @login_required
 def generate_ai_letter(request):
-    """توليد صياغة رسمية للخطاب مع اكتشاف النموذج المتاح في حسابك تلقائياً"""
+    """توليد صياغة رسمية للخطاب مع دعم النماذج الجديدة الموصى بها من Google"""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'طلب غير مصرح به.'}, status=405)
 
@@ -353,27 +353,44 @@ def generate_ai_letter(request):
             "والخاتمة الرسمية، بناءً على المعطيات التالية:\n"
         )
         
-        # جلب قائمة النماذج المفعلة فعلياً في حساب Google AI Studio الخاص بك
-        target_model = None
+        # قائمة النماذج الجديدة المعتمدة لدى Google بالترتيب
+        candidate_models = [
+            'gemini-3.6-flash',
+            'gemini-3.5-flash',
+            'gemini-3.1-flash-lite',
+            'gemini-2.5-flash-lite',
+            'gemini-1.5-flash-latest',
+        ]
+        
+        # إضافة أي نماذج أخرى مفعلة في الحساب
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    if 'flash' in m.name or 'pro' in m.name:
-                        target_model = m.name
-                        break
+                    clean_name = m.name.replace('models/', '')
+                    if clean_name not in candidate_models:
+                        candidate_models.append(clean_name)
         except Exception:
             pass
-            
-        if not target_model:
-            target_model = 'models/gemini-1.5-flash'
 
-        model = genai.GenerativeModel(target_model)
-        response = model.generate_content(system_instruction + prompt)
-        
-        if response and response.text:
-            return JsonResponse({'success': True, 'text': response.text.strip()})
+        response_text = None
+        last_error = None
+
+        # تجربة النماذج بالتسلسل حتى ينجح التوليد
+        for model_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(model_name)
+                res = model.generate_content(system_instruction + prompt)
+                if res and res.text:
+                    response_text = res.text.strip()
+                    break
+            except Exception as err:
+                last_error = err
+                continue
+
+        if response_text:
+            return JsonResponse({'success': True, 'text': response_text})
         else:
-            return JsonResponse({'success': False, 'error': 'لم يتم استلام نص من النموذج.'})
+            raise last_error or Exception("تعذر توليد الخطاب عبر النماذج المتاحة.")
 
     except Exception as e:
         return JsonResponse({'success': False, 'error': f'فشل توليد الخطاب: {str(e)}'})
