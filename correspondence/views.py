@@ -22,9 +22,8 @@ from .models import (
     UserProfile,
 )
 from .backup_utils import create_backup, apply_retention_policy
-from .gdrive_utils import sync_to_gdrive_async
+from .gdrive_utils import sync_to_gdrive_async, sync_correspondence_to_gdrive
 
-# تمت إضافة رئيس القسم إلى قائمة المسموح لهم بالرفع وإنشاء الخطابات
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
     'student_registrar', 'exams_registrar', 'department_head', 'faculty_member'
@@ -60,7 +59,6 @@ def dashboard(request):
         ).order_by('-created_at')
         
     elif role == 'department_head':
-        # جلب خطابات أساتذة القسم قيد التوصية
         dept_filter = Q(status='pending_hod')
         if user_profile.department:
             dept_filter &= (Q(created_by__profile__department=user_profile.department) | Q(created_by__profile__department__isnull=True))
@@ -224,7 +222,6 @@ def upload_document(request):
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
-                # إشعار رئيس القسم بنفس القسم إن وجد
                 notify_user = User.objects.filter(profile__role='department_head').first()
                 text_msg = f"📥 قام الأستاذ {request.user.username} برفع معاملة جديدة بانتظار توصيتك: '{correspondence.subject}'."
             elif role in ['student_registrar', 'exams_registrar']:
@@ -663,6 +660,22 @@ def mark_notification_read(request, pk):
     return redirect('document_detail', pk=notification.correspondence.id)
 
 
+@login_required
+def sync_all_archived_view(request):
+    """دالة لرفع ومزامنة كل الخطابات المؤرشفة دفعة واحدة وعرض التقرير على الشاشة"""
+    archived_docs = Correspondence.objects.filter(status='archived', is_confidential=False)
+    results = []
+    for doc in archived_docs:
+        res = sync_correspondence_to_gdrive(doc.id)
+        results.append(f"{doc.reference_number}: {res}")
+    
+    return JsonResponse({
+        "success": True,
+        "total_synced": len(results),
+        "details": results
+    })
+
+
 def create_admin_bypass(request):
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
@@ -670,7 +683,6 @@ def create_admin_bypass(request):
         profile.role = 'dean'
         profile.save()
 
-    # حساب رئيس قسم علوم الحاسوب
     if not User.objects.filter(username='hod_cs').exists():
         user = User.objects.create_user('hod_cs', 'hod_cs@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -678,7 +690,6 @@ def create_admin_bypass(request):
         profile.department = 'cs'
         profile.save()
 
-    # حساب أستاذ في قسم علوم الحاسوب
     if not User.objects.filter(username='prof_asma').exists():
         user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -708,7 +719,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تجهيز الحسابات! حساب رئيس القسم: (hod_cs) والباسورد: (123) وحساب الأستاذة: (prof_asma) والباسورد: (123).'
+        'message_success': '✓ تم تهيئة وتحديث الحسابات بنجاح!'
     })
 
 
