@@ -11,14 +11,22 @@ from django.conf import settings
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 
-def get_drive_service():
-    """تهيئة والاتصال بـ Google Drive API باستخدام حسابك الشخصي (OAuth2)"""
-    client_id = config('GDRIVE_CLIENT_ID', default='')
-    client_secret = config('GDRIVE_CLIENT_SECRET', default='')
-    refresh_token = config('GDRIVE_REFRESH_TOKEN', default='')
+def get_drive_service_with_status():
+    """تهيئة والاتصال بـ Google Drive API مع إرجاع رسالة تشخيص واضحة"""
+    client_id = config('GDRIVE_CLIENT_ID', default='').strip()
+    client_secret = config('GDRIVE_CLIENT_SECRET', default='').strip()
+    refresh_token = config('GDRIVE_REFRESH_TOKEN', default='').strip()
 
-    if not all([client_id, client_secret, refresh_token]):
-        return None
+    missing = []
+    if not client_id:
+        missing.append('GDRIVE_CLIENT_ID')
+    if not client_secret:
+        missing.append('GDRIVE_CLIENT_SECRET')
+    if not refresh_token:
+        missing.append('GDRIVE_REFRESH_TOKEN')
+
+    if missing:
+        return None, f"متغيرات بيئة ناقصة في Render: {', '.join(missing)}"
 
     try:
         creds = Credentials(
@@ -30,10 +38,10 @@ def get_drive_service():
             scopes=SCOPES
         )
         creds.refresh(Request())
-        return build('drive', 'v3', credentials=creds)
+        service = build('drive', 'v3', credentials=creds)
+        return service, "OK"
     except Exception as e:
-        print(f"Error initializing OAuth Drive Service: {e}")
-        return None
+        return None, f"خطأ أثناء مصادقة OAuth من Google: {str(e)}"
 
 
 def get_or_create_folder(service, folder_name, parent_folder_id):
@@ -173,7 +181,7 @@ def generate_html_letter(correspondence):
 
 
 def sync_correspondence_to_gdrive(correspondence_id):
-    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive لحسابك الشخصي مباشرة"""
+    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive"""
     from .models import Correspondence
 
     try:
@@ -184,13 +192,13 @@ def sync_correspondence_to_gdrive(correspondence_id):
     if correspondence.is_confidential:
         return "خطاب سري - تم الاستثناء"
 
-    root_folder_id = config('GDRIVE_ROOT_FOLDER_ID', default='')
+    root_folder_id = config('GDRIVE_ROOT_FOLDER_ID', default='').strip()
     if not root_folder_id:
-        return "لم يتم تعيين GDRIVE_ROOT_FOLDER_ID"
+        return "لم يتم تعيين GDRIVE_ROOT_FOLDER_ID في Render"
 
-    service = get_drive_service()
+    service, status_msg = get_drive_service_with_status()
     if not service:
-        return "فشل الاتصال بـ Google Drive عبر OAuth"
+        return status_msg
 
     try:
         # 1. جلب مجلد السنة
