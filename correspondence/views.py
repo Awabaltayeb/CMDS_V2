@@ -22,6 +22,7 @@ from .models import (
     UserProfile,
 )
 from .backup_utils import create_backup, apply_retention_policy
+from .gdrive_utils import sync_to_gdrive_async
 
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
@@ -331,7 +332,6 @@ def edit_document(request, pk):
 
 @login_required
 def generate_ai_letter(request):
-    """توليد صياغة رسمية للخطاب مع دعم النماذج الجديدة الموصى بها من Google"""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'طلب غير مصرح به.'}, status=405)
 
@@ -353,7 +353,6 @@ def generate_ai_letter(request):
             "والخاتمة الرسمية، بناءً على المعطيات التالية:\n"
         )
         
-        # قائمة النماذج الجديدة المعتمدة لدى Google بالترتيب
         candidate_models = [
             'gemini-3.6-flash',
             'gemini-3.5-flash',
@@ -362,7 +361,6 @@ def generate_ai_letter(request):
             'gemini-1.5-flash-latest',
         ]
         
-        # إضافة أي نماذج أخرى مفعلة في الحساب
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
@@ -375,7 +373,6 @@ def generate_ai_letter(request):
         response_text = None
         last_error = None
 
-        # تجربة النماذج بالتسلسل حتى ينجح التوليد
         for model_name in candidate_models:
             try:
                 model = genai.GenerativeModel(model_name)
@@ -448,7 +445,11 @@ def document_detail(request, pk):
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
                 correspondence.save()
-                messages.success(request, 'تم تنفيذ المعاملة وأرشفتها بنجاح.')
+                
+                # ☁️ مزامنة سحابية غير متزامنة إلى Google Drive
+                sync_to_gdrive_async(correspondence)
+                
+                messages.success(request, 'تم تنفيذ المعاملة وأرشفتها ومزامنتها سحابياً بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
@@ -459,7 +460,11 @@ def document_detail(request, pk):
                 correspondence.handled_by = user
                 correspondence.handled_at = timezone.now()
                 correspondence.save()
-                messages.success(request, 'تمت أرشفة المعاملة مباشرة دون توجيه بنجاح.')
+                
+                # ☁️ مزامنة سحابية غير متزامنة إلى Google Drive
+                sync_to_gdrive_async(correspondence)
+                
+                messages.success(request, 'تمت أرشفة المعاملة مباشرة ومزامنتها سحابياً بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
