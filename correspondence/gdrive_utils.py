@@ -34,7 +34,14 @@ def get_or_create_folder(service, folder_name, parent_folder_id):
         f"name = '{folder_name}' and "
         f"'{parent_folder_id}' in parents and trashed = false"
     )
-    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    results = service.files().list(
+        q=query, 
+        spaces='drive', 
+        fields='files(id, name)',
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
+    
     files = results.get('files', [])
     if files:
         return files[0]['id']
@@ -44,7 +51,11 @@ def get_or_create_folder(service, folder_name, parent_folder_id):
             'mimeType': 'application/vnd.google-apps.folder',
             'parents': [parent_folder_id]
         }
-        folder = service.files().create(body=folder_metadata, fields='id').execute()
+        folder = service.files().create(
+            body=folder_metadata, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
         return folder.get('id')
 
 
@@ -156,7 +167,7 @@ def generate_html_letter(correspondence):
 
 
 def sync_correspondence_to_gdrive(correspondence_id):
-    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive بالرفع المباشر"""
+    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive"""
     from .models import Correspondence
 
     try:
@@ -176,7 +187,7 @@ def sync_correspondence_to_gdrive(correspondence_id):
         return "فشل الاتصال بـ Google Drive API"
 
     try:
-        # 1. جلب أو إنشاء مجلد السنة
+        # 1. جلب مجلد السنة
         year_str = str(correspondence.document_date.year)
         year_folder_id = get_or_create_folder(service, year_str, root_folder_id)
 
@@ -191,17 +202,18 @@ def sync_correspondence_to_gdrive(correspondence_id):
         # 4. تجهيز اسم وملف الرفع
         clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
         
+        has_file = False
         if correspondence.file:
-            file_name = f"{correspondence.reference_number}.pdf"
-            mime_type = 'application/pdf'
             try:
                 correspondence.file.open('rb')
                 file_stream = io.BytesIO(correspondence.file.read())
+                file_name = f"{correspondence.reference_number}.pdf"
+                mime_type = 'application/pdf'
+                has_file = True
             except Exception:
-                file_path = os.path.join(settings.MEDIA_ROOT, correspondence.file.name)
-                with open(file_path, 'rb') as f:
-                    file_stream = io.BytesIO(f.read())
-        else:
+                has_file = False
+
+        if not has_file:
             file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             mime_type = 'text/html'
             file_stream = generate_html_letter(correspondence)
@@ -213,7 +225,13 @@ def sync_correspondence_to_gdrive(correspondence_id):
             'parents': [target_folder_id]
         }
         
-        uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id, name').execute()
+        uploaded_file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id, name',
+            supportsAllDrives=True
+        ).execute()
+        
         return f"تم الرفع بنجاح: {uploaded_file.get('name')} (ID: {uploaded_file.get('id')})"
 
     except Exception as e:
