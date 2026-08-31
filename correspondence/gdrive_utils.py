@@ -1,9 +1,9 @@
 import os
 import io
-import json
 import threading
 from decouple import config
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from django.conf import settings
@@ -12,18 +12,27 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 
 
 def get_drive_service():
-    """تهيئة والاتصال بـ Google Drive API باستخدام حساب الخدمة"""
-    credentials_raw = config('GDRIVE_CREDENTIALS_JSON', default='')
-    if not credentials_raw:
+    """تهيئة والاتصال بـ Google Drive API باستخدام حسابك الشخصي (OAuth2)"""
+    client_id = config('GDRIVE_CLIENT_ID', default='')
+    client_secret = config('GDRIVE_CLIENT_SECRET', default='')
+    refresh_token = config('GDRIVE_REFRESH_TOKEN', default='')
+
+    if not all([client_id, client_secret, refresh_token]):
         return None
+
     try:
-        service_account_info = json.loads(credentials_raw)
-        creds = service_account.Credentials.from_service_account_info(
-            service_account_info, scopes=SCOPES
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=SCOPES
         )
+        creds.refresh(Request())
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        print(f"Error initializing Google Drive Service: {e}")
+        print(f"Error initializing OAuth Drive Service: {e}")
         return None
 
 
@@ -37,9 +46,7 @@ def get_or_create_folder(service, folder_name, parent_folder_id):
     results = service.files().list(
         q=query, 
         spaces='drive', 
-        fields='files(id, name)',
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
+        fields='files(id, name)'
     ).execute()
     
     files = results.get('files', [])
@@ -53,8 +60,7 @@ def get_or_create_folder(service, folder_name, parent_folder_id):
         }
         folder = service.files().create(
             body=folder_metadata, 
-            fields='id',
-            supportsAllDrives=True
+            fields='id'
         ).execute()
         return folder.get('id')
 
@@ -167,7 +173,7 @@ def generate_html_letter(correspondence):
 
 
 def sync_correspondence_to_gdrive(correspondence_id):
-    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive"""
+    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive لحسابك الشخصي مباشرة"""
     from .models import Correspondence
 
     try:
@@ -184,7 +190,7 @@ def sync_correspondence_to_gdrive(correspondence_id):
 
     service = get_drive_service()
     if not service:
-        return "فشل الاتصال بـ Google Drive API"
+        return "فشل الاتصال بـ Google Drive عبر OAuth"
 
     try:
         # 1. جلب مجلد السنة
@@ -228,8 +234,7 @@ def sync_correspondence_to_gdrive(correspondence_id):
         uploaded_file = service.files().create(
             body=file_metadata, 
             media_body=media, 
-            fields='id, name',
-            supportsAllDrives=True
+            fields='id, name'
         ).execute()
         
         return f"تم الرفع بنجاح: {uploaded_file.get('name')} (ID: {uploaded_file.get('id')})"
