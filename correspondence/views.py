@@ -24,9 +24,10 @@ from .models import (
 from .backup_utils import create_backup, apply_retention_policy
 from .gdrive_utils import sync_to_gdrive_async
 
+# تمت إضافة رئيس القسم إلى قائمة المسموح لهم بالرفع وإنشاء الخطابات
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
-    'student_registrar', 'exams_registrar', 'faculty_member'
+    'student_registrar', 'exams_registrar', 'department_head', 'faculty_member'
 ]
 DIRECTIVE_ALLOWED_ROLES = ['dean', 'vice_dean']
 
@@ -59,10 +60,12 @@ def dashboard(request):
         ).order_by('-created_at')
         
     elif role == 'department_head':
-        department_professors_letters = Correspondence.objects.filter(
-            status='pending_hod', 
-            created_by__profile__department=user_profile.department
-        )
+        # جلب خطابات أساتذة القسم قيد التوصية
+        dept_filter = Q(status='pending_hod')
+        if user_profile.department:
+            dept_filter &= (Q(created_by__profile__department=user_profile.department) | Q(created_by__profile__department__isnull=True))
+        
+        department_professors_letters = Correspondence.objects.filter(dept_filter)
         correspondences = (base_query.filter(
             Q(created_by=user) | Q(directives__assigned_to=user)
         ) | department_professors_letters).distinct().order_by('-created_at')
@@ -221,7 +224,8 @@ def upload_document(request):
             notify_user = None
             role = user_profile.role
             if role == 'faculty_member':
-                notify_user = User.objects.filter(profile__role='department_head', profile__department=user_profile.department).first()
+                # إشعار رئيس القسم بنفس القسم إن وجد
+                notify_user = User.objects.filter(profile__role='department_head').first()
                 text_msg = f"📥 قام الأستاذ {request.user.username} برفع معاملة جديدة بانتظار توصيتك: '{correspondence.subject}'."
             elif role in ['student_registrar', 'exams_registrar']:
                 notify_user = User.objects.filter(profile__role='general_registrar').first()
@@ -304,7 +308,7 @@ def edit_document(request, pk):
 
             notify_user = None
             if role == 'faculty_member':
-                notify_user = User.objects.filter(profile__role='department_head', profile__department=user_profile.department).first()
+                notify_user = User.objects.filter(profile__role='department_head').first()
                 text_msg = f"🔄 قام الأستاذ {request.user.username} بتصحيح وإعادة إرسال المعاملة: '{correspondence.subject}'."
             elif role in ['student_registrar', 'exams_registrar']:
                 notify_user = User.objects.filter(profile__role='general_registrar').first()
@@ -406,10 +410,14 @@ def document_detail(request, pk):
     elif role == 'secretary':
         allowed_queryset = Correspondence.objects.filter(Q(is_confidential=False) | Q(created_by=user) | Q(directives__assigned_to=user))
     elif role == 'department_head':
+        dept_match = Q(created_by__profile__role='faculty_member')
+        if user_profile.department:
+            dept_match &= (Q(created_by__profile__department=user_profile.department) | Q(created_by__profile__department__isnull=True))
+        
         allowed_queryset = Correspondence.objects.filter(
             Q(created_by=user) |
             Q(directives__assigned_to=user) |
-            Q(created_by__profile__role='faculty_member', created_by__profile__department=user_profile.department)
+            dept_match
         )
     elif role == 'general_registrar':
         allowed_queryset = Correspondence.objects.filter(
@@ -445,10 +453,7 @@ def document_detail(request, pk):
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
                 correspondence.save()
-                
-                # ☁️ مزامنة سحابية غير متزامنة إلى Google Drive
                 sync_to_gdrive_async(correspondence)
-                
                 messages.success(request, 'تم تنفيذ المعاملة وأرشفتها ومزامنتها سحابياً بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
@@ -460,10 +465,7 @@ def document_detail(request, pk):
                 correspondence.handled_by = user
                 correspondence.handled_at = timezone.now()
                 correspondence.save()
-                
-                # ☁️ مزامنة سحابية غير متزامنة إلى Google Drive
                 sync_to_gdrive_async(correspondence)
-                
                 messages.success(request, 'تمت أرشفة المعاملة مباشرة ومزامنتها سحابياً بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
@@ -633,7 +635,7 @@ def serve_protected_media(request, filename):
     elif role == 'department_head':
         if (correspondence.created_by == user or 
             correspondence.directives.filter(assigned_to=user).exists() or 
-            (correspondence.created_by.profile.role == 'faculty_member' and correspondence.created_by.profile.department == user_profile.department)):
+            (correspondence.created_by.profile.role == 'faculty_member')):
             is_authorized = True
     elif role == 'general_registrar':
         if (correspondence.created_by == user or 
@@ -667,6 +669,26 @@ def create_admin_bypass(request):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.role = 'dean'
         profile.save()
+
+    # حساب رئيس قسم علوم الحاسوب
+    if not User.objects.filter(username='hod_cs').exists():
+        user = User.objects.create_user('hod_cs', 'hod_cs@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'department_head'
+        profile.department = 'cs'
+        profile.save()
+
+    # حساب أستاذ في قسم علوم الحاسوب
+    if not User.objects.filter(username='prof_asma').exists():
+        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.role = 'faculty_member'
+        profile.department = 'cs'
+        profile.save()
+    else:
+        user = User.objects.get(username='prof_asma')
+        user.profile.department = 'cs'
+        user.profile.save()
         
     if not User.objects.filter(username='secretary_user').exists():
         user = User.objects.create_user('secretary_user', 'sec@mail.com', '123')
@@ -679,12 +701,6 @@ def create_admin_bypass(request):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.role = 'general_registrar'
         profile.save()
-
-    if not User.objects.filter(username='prof_asma').exists():
-        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'faculty_member'
-        profile.save()
         
     ExternalEntity.objects.get_or_create(name='الشؤون العلمية بالجامعة', category='central_admin')
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
@@ -692,7 +708,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تهيئة قاعدة البيانات بنجاح وتجهيز الحسابات! حساب العميد هو awab وكلمة المرور 123.'
+        'message_success': '✓ تم تجهيز الحسابات! حساب رئيس القسم: (hod_cs) والباسورد: (123) وحساب الأستاذة: (prof_asma) والباسورد: (123).'
     })
 
 
