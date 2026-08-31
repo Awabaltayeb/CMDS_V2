@@ -150,44 +150,47 @@ def generate_html_letter(correspondence):
     </div>
 </body>
 </html>"""
-    return io.BytesIO(html_content.encode('utf-8'))
+    stream = io.BytesIO(html_content.encode('utf-8'))
+    stream.seek(0)
+    return stream
 
 
 def sync_correspondence_to_gdrive(correspondence_id):
-    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive بالهيكلية المعتمدة"""
+    """الدالة الرئيسية لمزامنة الخطاب إلى Google Drive بالرفع المباشر"""
     from .models import Correspondence
 
     try:
         correspondence = Correspondence.objects.get(pk=correspondence_id)
     except Correspondence.DoesNotExist:
-        return
+        return "المعاملة غير موجودة"
 
-    # استثناء الخطابات السرية تماماً
     if correspondence.is_confidential:
-        return
+        return "خطاب سري - تم الاستثناء"
 
     root_folder_id = config('GDRIVE_ROOT_FOLDER_ID', default='')
     if not root_folder_id:
-        return
+        return "لم يتم تعيين GDRIVE_ROOT_FOLDER_ID"
 
     service = get_drive_service()
     if not service:
-        return
+        return "فشل الاتصال بـ Google Drive API"
 
     try:
-        # 1. إنشاء / جلب مجلد السنة (مثلاً: 2026)
+        # 1. جلب أو إنشاء مجلد السنة
         year_str = str(correspondence.document_date.year)
         year_folder_id = get_or_create_folder(service, year_str, root_folder_id)
 
-        # 2. إنشاء / جلب مجلد الاتجاه (الوارد / الصادر)
+        # 2. مجلد الاتجاه
         dir_name = "الوارد (Incoming)" if correspondence.direction == 'incoming' else "الصادر (Outgoing)"
         dir_folder_id = get_or_create_folder(service, dir_name, year_folder_id)
 
-        # 3. إنشاء / جلب مجلد النطاق
+        # 3. مجلد النطاق
         scope_name = correspondence.get_scope_display()
         target_folder_id = get_or_create_folder(service, scope_name, dir_folder_id)
 
-        # 4. رفع الملف الفعلي
+        # 4. تجهيز اسم وملف الرفع
+        clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
+        
         if correspondence.file:
             file_name = f"{correspondence.reference_number}.pdf"
             mime_type = 'application/pdf'
@@ -199,23 +202,28 @@ def sync_correspondence_to_gdrive(correspondence_id):
                 with open(file_path, 'rb') as f:
                     file_stream = io.BytesIO(f.read())
         else:
-            file_name = f"{correspondence.reference_number}_{correspondence.subject[:25]}.html"
+            file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             mime_type = 'text/html'
             file_stream = generate_html_letter(correspondence)
 
-        media = MediaIoBaseUpload(file_stream, mimetype=mime_type, resumable=True)
+        file_stream.seek(0)
+        media = MediaIoBaseUpload(file_stream, mimetype=mime_type, resumable=False)
         file_metadata = {
             'name': file_name,
             'parents': [target_folder_id]
         }
-        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        
+        uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id, name').execute()
+        return f"تم الرفع بنجاح: {uploaded_file.get('name')} (ID: {uploaded_file.get('id')})"
 
     except Exception as e:
-        print(f"Error syncing to Google Drive: {e}")
+        err_msg = f"خطأ أثناء الرفع: {str(e)}"
+        print(err_msg)
+        return err_msg
 
 
 def sync_to_gdrive_async(correspondence):
-    """تشغيل المزامنة في الخلفية دون تعطيل واجهة المستخدم"""
+    """تشغيل المزامنة في الخلفية"""
     thread = threading.Thread(target=sync_correspondence_to_gdrive, args=(correspondence.id,))
     thread.daemon = True
     thread.start()
