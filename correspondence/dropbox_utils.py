@@ -9,26 +9,11 @@ from django.conf import settings
 def get_dropbox_client():
     """تهيئة والاتصال بـ Dropbox API"""
     access_token = config('DROPBOX_ACCESS_TOKEN', default='').strip()
-    app_key = config('DROPBOX_APP_KEY', default='').strip()
-    app_secret = config('DROPBOX_APP_SECRET', default='').strip()
-    refresh_token = config('DROPBOX_REFRESH_TOKEN', default='').strip()
-
-    if refresh_token and app_key and app_secret:
-        try:
-            return dropbox.Dropbox(
-                app_key=app_key,
-                app_secret=app_secret,
-                oauth2_refresh_token=refresh_token
-            )
-        except Exception as e:
-            print(f"Error initializing Dropbox with refresh token: {e}")
-
     if access_token:
         try:
             return dropbox.Dropbox(access_token)
         except Exception as e:
-            print(f"Error initializing Dropbox with access token: {e}")
-
+            print(f"Error initializing Dropbox: {e}")
     return None
 
 
@@ -160,7 +145,6 @@ def sync_correspondence_to_dropbox(correspondence_id):
         clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
 
         file_bytes = None
-        # محاولة قراءة ملف الـ PDF إن وجد
         if correspondence.file:
             try:
                 correspondence.file.open('rb')
@@ -169,15 +153,15 @@ def sync_correspondence_to_dropbox(correspondence_id):
             except Exception:
                 file_bytes = None
 
-        # إذا لم يكن هناك ملف PDF مرفوع أو لم يتم العثور عليه، نولد الخطاب النصي
         if not file_bytes:
             file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             file_bytes = generate_html_letter(correspondence)
 
-        dropbox_path = f"/أرشيف كلية علوم الحاسوب/{year_str}/{dir_name}/{scope_name}/{file_name}"
+        # مسار التخزين المنظم داخل Dropbox
+        dropbox_path = f"/CDMS_Archive/{year_str}/{dir_name}/{scope_name}/{file_name}"
 
-        # استخدام نمط الكتابة الافتراضي المباشر المتوافق مع بايثون
-        meta = dbx.files_upload(file_bytes, dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+        # رفع الملف
+        meta = dbx.files_upload(file_bytes, dropbox_path)
         return f"تم الرفع بنجاح إلى Dropbox: {meta.path_display}"
 
     except Exception as e:
@@ -187,7 +171,7 @@ def sync_correspondence_to_dropbox(correspondence_id):
 
 
 def sync_to_dropbox_async(correspondence):
-    """تشغيل المزامنة في الخلفية دون تعطيل واجهة المستخدم"""
+    """تشغيل المزامنة في الخلفية"""
     thread = threading.Thread(target=sync_correspondence_to_dropbox, args=(correspondence.id,))
     thread.daemon = True
     thread.start()
