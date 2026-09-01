@@ -62,7 +62,7 @@ if config('USE_POSTGRES', default=False, cast=bool) or config('DATABASE_URL', de
         default=config('DATABASE_URL', default=''),
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require=True,  # السطر الجديد الحاسم لتفعيل تشفير SSL ومنع الإغلاق المفاجئ!
+        ssl_require=True,
     )
     }
 else:
@@ -131,7 +131,6 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='your_college_email@gmail.com')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
-# مفتاح الأمان الخاص بذكاء اصطناعي لجوجل جيميناي (يقوم بالاتصال بـ API لإنشاء الخطابات)
 GOOGLE_API_KEY = config('GOOGLE_API_KEY', default='')
 
 BACKUP_ROOT = BASE_DIR / 'backups'
