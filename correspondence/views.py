@@ -22,7 +22,7 @@ from .models import (
     UserProfile,
 )
 from .backup_utils import create_backup, apply_retention_policy
-from .gdrive_utils import sync_to_gdrive_async, sync_correspondence_to_gdrive
+from .dropbox_utils import sync_to_dropbox_async, sync_correspondence_to_dropbox
 
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
@@ -450,8 +450,11 @@ def document_detail(request, pk):
             if existing_directive and existing_directive.assigned_to == user:
                 correspondence.status = 'archived'
                 correspondence.save()
-                sync_to_gdrive_async(correspondence)
-                messages.success(request, 'تم تنفيذ المعاملة وأرشفتها ومزامنتها سحابياً بنجاح.')
+                
+                # 📦 مزامنة فورية سحابياً إلى Dropbox
+                sync_to_dropbox_async(correspondence)
+                
+                messages.success(request, 'تم تنفيذ المعاملة وأرشفتها ومزامنتها إلى Dropbox بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
@@ -462,8 +465,11 @@ def document_detail(request, pk):
                 correspondence.handled_by = user
                 correspondence.handled_at = timezone.now()
                 correspondence.save()
-                sync_to_gdrive_async(correspondence)
-                messages.success(request, 'تمت أرشفة المعاملة مباشرة ومزامنتها سحابياً بنجاح.')
+                
+                # 📦 مزامنة فورية سحابياً إلى Dropbox
+                sync_to_dropbox_async(correspondence)
+                
+                messages.success(request, 'تمت أرشفة المعاملة مباشرة ومزامنتها إلى Dropbox بنجاح.')
             else:
                 messages.error(request, 'لا تملك صلاحية أرشفة هذه المعاملة.')
             return redirect('dashboard')
@@ -662,11 +668,11 @@ def mark_notification_read(request, pk):
 
 @login_required
 def sync_all_archived_view(request):
-    """دالة لرفع ومزامنة كل الخطابات المؤرشفة دفعة واحدة وعرض التقرير على الشاشة"""
+    """دالة لرفع ومزامنة كل الخطابات المؤرشفة إلى Dropbox دفعة واحدة وعرض التقرير"""
     archived_docs = Correspondence.objects.filter(status='archived', is_confidential=False)
     results = []
     for doc in archived_docs:
-        res = sync_correspondence_to_gdrive(doc.id)
+        res = sync_correspondence_to_dropbox(doc.id)
         results.append(f"{doc.reference_number}: {res}")
     
     return JsonResponse({
