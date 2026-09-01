@@ -201,19 +201,15 @@ def sync_correspondence_to_gdrive(correspondence_id):
         return status_msg
 
     try:
-        # 1. جلب مجلد السنة
         year_str = str(correspondence.document_date.year)
         year_folder_id = get_or_create_folder(service, year_str, root_folder_id)
 
-        # 2. مجلد الاتجاه
         dir_name = "الوارد (Incoming)" if correspondence.direction == 'incoming' else "الصادر (Outgoing)"
         dir_folder_id = get_or_create_folder(service, dir_name, year_folder_id)
 
-        # 3. مجلد النطاق
         scope_name = correspondence.get_scope_display()
         target_folder_id = get_or_create_folder(service, scope_name, dir_folder_id)
 
-        # 4. تجهيز اسم وملف الرفع
         clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
         
         has_file = False
