@@ -157,10 +157,8 @@ def sync_correspondence_to_dropbox(correspondence_id):
             file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             file_bytes = generate_html_letter(correspondence)
 
-        # مسار التخزين المنظم داخل Dropbox
         dropbox_path = f"/CDMS_Archive/{year_str}/{dir_name}/{scope_name}/{file_name}"
 
-        # رفع الملف
         meta = dbx.files_upload(file_bytes, dropbox_path)
         return f"تم الرفع بنجاح إلى Dropbox: {meta.path_display}"
 
