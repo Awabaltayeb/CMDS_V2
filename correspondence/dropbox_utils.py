@@ -3,7 +3,6 @@ import io
 import threading
 from decouple import config
 import dropbox
-from dropbox.files import WriteMode
 from django.conf import settings
 
 
@@ -139,7 +138,7 @@ def generate_html_letter(correspondence):
 
 
 def sync_correspondence_to_dropbox(correspondence_id):
-    """الدالة الرئيسية لرفع الخطاب إلى Dropbox بالهيكلية المنظمة"""
+    """الدالة الرئيسية لرفع الخطاب إلى Dropbox"""
     from .models import Correspondence
 
     try:
@@ -160,25 +159,25 @@ def sync_correspondence_to_dropbox(correspondence_id):
         scope_name = correspondence.get_scope_display().replace('/', '-')
         clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
 
-        # قراءة الملف
+        file_bytes = None
+        # محاولة قراءة ملف الـ PDF إن وجد
         if correspondence.file:
-            file_name = f"{correspondence.reference_number}.pdf"
             try:
                 correspondence.file.open('rb')
                 file_bytes = correspondence.file.read()
+                file_name = f"{correspondence.reference_number}.pdf"
             except Exception:
-                file_path = os.path.join(settings.MEDIA_ROOT, correspondence.file.name)
-                with open(file_path, 'rb') as f:
-                    file_bytes = f.read()
-        else:
+                file_bytes = None
+
+        # إذا لم يكن هناك ملف PDF مرفوع أو لم يتم العثور عليه، نولد الخطاب النصي
+        if not file_bytes:
             file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             file_bytes = generate_html_letter(correspondence)
 
-        # المسار الكامل (دروب بوكس ينشئ كل المجلدات المتداخلة تلقائياً بذكاء)
         dropbox_path = f"/أرشيف كلية علوم الحاسوب/{year_str}/{dir_name}/{scope_name}/{file_name}"
 
-        # رفع الملف
-        meta = dbx.files_upload(file_bytes, dropbox_path, mode=WriteMode('overwrite'))
+        # استخدام نمط الكتابة الافتراضي المباشر المتوافق مع بايثون
+        meta = dbx.files_upload(file_bytes, dropbox_path, mode=dropbox.files.WriteMode.overwrite)
         return f"تم الرفع بنجاح إلى Dropbox: {meta.path_display}"
 
     except Exception as e:
