@@ -1,9 +1,9 @@
 import os
 import io
+import json
 import threading
 from decouple import config
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from django.conf import settings
@@ -12,36 +12,23 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 
 
 def get_drive_service_with_status():
-    """تهيئة والاتصال بـ Google Drive API مع إرجاع رسالة تشخيص واضحة"""
-    client_id = config('GDRIVE_CLIENT_ID', default='').strip()
-    client_secret = config('GDRIVE_CLIENT_SECRET', default='').strip()
-    refresh_token = config('GDRIVE_REFRESH_TOKEN', default='').strip()
+    """تهيئة والاتصال بـ Google Drive API عبر حساب خدمة (Service Account) مع إرجاع رسالة تشخيص واضحة"""
+    service_account_json = config('GDRIVE_SERVICE_ACCOUNT_JSON', default='').strip()
 
-    missing = []
-    if not client_id:
-        missing.append('GDRIVE_CLIENT_ID')
-    if not client_secret:
-        missing.append('GDRIVE_CLIENT_SECRET')
-    if not refresh_token:
-        missing.append('GDRIVE_REFRESH_TOKEN')
-
-    if missing:
-        return None, f"متغيرات بيئة ناقصة في Render: {', '.join(missing)}"
+    if not service_account_json:
+        return None, "متغير GDRIVE_SERVICE_ACCOUNT_JSON غير موجود في Render"
 
     try:
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_id,
-            client_secret=client_secret,
-            scopes=SCOPES
-        )
-        creds.refresh(Request())
+        info = json.loads(service_account_json)
+    except json.JSONDecodeError:
+        return None, "GDRIVE_SERVICE_ACCOUNT_JSON غير صالح كـ JSON — تأكد إنك نسخت محتوى ملف الـ key كامل"
+
+    try:
+        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
         service = build('drive', 'v3', credentials=creds)
         return service, "OK"
     except Exception as e:
-        return None, f"خطأ أثناء مصادقة OAuth من Google: {str(e)}"
+        return None, f"خطأ أثناء مصادقة Service Account: {str(e)}"
 
 
 def get_or_create_folder(service, folder_name, parent_folder_id):
@@ -201,15 +188,19 @@ def sync_correspondence_to_gdrive(correspondence_id):
         return status_msg
 
     try:
+        # 1. جلب مجلد السنة
         year_str = str(correspondence.document_date.year)
         year_folder_id = get_or_create_folder(service, year_str, root_folder_id)
 
+        # 2. مجلد الاتجاه
         dir_name = "الوارد (Incoming)" if correspondence.direction == 'incoming' else "الصادر (Outgoing)"
         dir_folder_id = get_or_create_folder(service, dir_name, year_folder_id)
 
+        # 3. مجلد النطاق
         scope_name = correspondence.get_scope_display()
         target_folder_id = get_or_create_folder(service, scope_name, dir_folder_id)
 
+        # 4. تجهيز اسم وملف الرفع
         clean_subj = "".join([c for c in correspondence.subject if c.isalnum() or c in (' ', '_', '-')]).strip()[:20]
         
         has_file = False
