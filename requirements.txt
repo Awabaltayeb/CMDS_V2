@@ -9,3 +9,4 @@ dropbox==12.2.1
 reportlab==4.2.5
 google-api-python-client==2.149.0
 google-auth==2.35.0
+google-auth-oauthlib==1.2.1
