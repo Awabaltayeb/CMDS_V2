@@ -7,14 +7,32 @@ from django.conf import settings
 
 
 def get_dropbox_client():
-    """تهيئة والاتصال بـ Dropbox API"""
-    access_token = config('DROPBOX_ACCESS_TOKEN', default='').strip()
-    if access_token:
-        try:
-            return dropbox.Dropbox(access_token)
-        except Exception as e:
-            print(f"Error initializing Dropbox: {e}")
-    return None
+    """تهيئة والاتصال بـ Dropbox API عبر refresh token دائم لا ينتهي كل بضع ساعات"""
+    app_key = config('DROPBOX_APP_KEY', default='').strip()
+    app_secret = config('DROPBOX_APP_SECRET', default='').strip()
+    refresh_token = config('DROPBOX_REFRESH_TOKEN', default='').strip()
+
+    missing = []
+    if not app_key:
+        missing.append('DROPBOX_APP_KEY')
+    if not app_secret:
+        missing.append('DROPBOX_APP_SECRET')
+    if not refresh_token:
+        missing.append('DROPBOX_REFRESH_TOKEN')
+
+    if missing:
+        print(f"Dropbox: متغيرات بيئة ناقصة: {', '.join(missing)}")
+        return None
+
+    try:
+        return dropbox.Dropbox(
+            oauth2_refresh_token=refresh_token,
+            app_key=app_key,
+            app_secret=app_secret,
+        )
+    except Exception as e:
+        print(f"Error initializing Dropbox: {e}")
+        return None
 
 
 def generate_html_letter(correspondence):
@@ -136,7 +154,7 @@ def sync_correspondence_to_dropbox(correspondence_id):
 
     dbx = get_dropbox_client()
     if not dbx:
-        return "فشل الاتصال بـ Dropbox (تأكد من DROPBOX_ACCESS_TOKEN في Render)"
+        return "فشل الاتصال بـ Dropbox (تأكد من DROPBOX_APP_KEY و DROPBOX_APP_SECRET و DROPBOX_REFRESH_TOKEN في Render)"
 
     try:
         year_str = str(correspondence.document_date.year)
@@ -157,8 +175,10 @@ def sync_correspondence_to_dropbox(correspondence_id):
             file_name = f"{correspondence.reference_number}_{clean_subj}.html"
             file_bytes = generate_html_letter(correspondence)
 
+        # مسار التخزين المنظم داخل Dropbox
         dropbox_path = f"/CDMS_Archive/{year_str}/{dir_name}/{scope_name}/{file_name}"
 
+        # رفع الملف
         meta = dbx.files_upload(file_bytes, dropbox_path)
         return f"تم الرفع بنجاح إلى Dropbox: {meta.path_display}"
 
