@@ -6,7 +6,7 @@ from django.core.validators import FileExtensionValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-MAX_UPLOAD_SIZE_MB = 5
+MAX_UPLOAD_SIZE_MB = 10
 
 def validate_file_size(file):
     limit_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -105,7 +105,7 @@ class Correspondence(models.Model):
         ('pending_g_registrar', 'قيد مراجعة المسجل العام'),
         ('pending_dean', 'قيد المراجعة عند العميد/نائبه'),
         ('assigned', 'موجه'),
-        ('returned', 'مرتجع لتصحيح البيانات'), # الحالة الجديدة لميزة الارتجاع
+        ('returned', 'مرتجع لتصحيح البيانات'),
         ('archived', 'منفذ / مؤرشف'),
     ]
 
@@ -135,7 +135,7 @@ class Correspondence(models.Model):
     body_text = models.TextField(null=True, blank=True, verbose_name="محتوى الخطاب النصي")
     document_date = models.DateField(default=datetime.date.today, verbose_name="تاريخ الخطاب")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded', verbose_name="الحالة")
-    return_reason = models.TextField(null=True, blank=True, verbose_name="سبب الإرجاع لتصحيح البيانات") # حقل الارتجاع الجديد
+    return_reason = models.TextField(null=True, blank=True, verbose_name="سبب الإرجاع لتصحيح البيانات")
     
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_correspondences', verbose_name="أنشئ بواسطة")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء في النظام")
@@ -207,7 +207,6 @@ class Comment(models.Model):
     def __str__(self):
         return f"تعليق من {self.author.username} على {self.correspondence.reference_number}"
 
-# 6. جدول الإشعارات داخل النظام المضاف حديثاً (ميزة الفكرة 2)
 class Notification(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', verbose_name="المستلم")
     text = models.TextField(verbose_name="نص الإشعار")
@@ -221,3 +220,65 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"إشعار لـ {self.recipient.username}: {self.text[:30]}"
+
+
+# =========================================================
+# 🏛️ نظام أرشفة المؤتمرات والفعاليات العلمية المستقل
+# =========================================================
+
+class Conference(models.Model):
+    """جدول المؤتمرات والفعاليات العلمية المستقل"""
+    title = models.CharField(max_length=255, verbose_name="اسم المؤتمر / الفعالية")
+    year = models.IntegerField(default=datetime.date.today().year, verbose_name="سنة المؤتمر")
+    start_date = models.DateField(null=True, blank=True, verbose_name="تاريخ الانعقاد / البداية")
+    end_date = models.DateField(null=True, blank=True, verbose_name="تاريخ الختام")
+    location = models.CharField(max_length=200, default="كلية علوم الحاسوب وتقانة المعلومات - جامعة البطانة", verbose_name="مكان الانعقاد")
+    description = models.TextField(null=True, blank=True, verbose_name="نبذة عن المؤتمر وأهدافه")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_conferences', verbose_name="أنشئ بواسطة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التسجيل")
+
+    class Meta:
+        verbose_name = "مؤتمر / فعالية"
+        verbose_name_plural = "المؤتمرات والفعاليات العلمية"
+        ordering = ['-year', '-created_at']
+
+    def __str__(self):
+        return f"{self.title} ({self.year})"
+
+
+class ConferenceDocument(models.Model):
+    """جدول وثائق وأوراق وملفات المؤتمر"""
+    DOC_TYPES = [
+        ('research_paper', 'ورقة علمية / بحث'),
+        ('schedule', 'جدول الجلسات والبرنامج'),
+        ('recommendations', 'التوصيات الختامية والقرارات'),
+        ('speech', 'كلمة افتتاحية / ختامية'),
+        ('presentation', 'عرض تقديمي (Slide/Presentation)'),
+        ('report', 'تقرير إداري / مالي'),
+        ('certificate', 'شهادة / تكريم'),
+        ('other', 'مستند آخر'),
+    ]
+
+    conference = models.ForeignKey(Conference, on_delete=models.CASCADE, related_name='documents', verbose_name="المؤتمر المرتبط")
+    title = models.CharField(max_length=255, verbose_name="عنوان الوثيقة / الورقة")
+    document_type = models.CharField(max_length=30, choices=DOC_TYPES, default='research_paper', verbose_name="تصنيف الملف")
+    author_or_presenter = models.CharField(max_length=150, null=True, blank=True, verbose_name="اسم الباحث / المتحدث / المعد")
+    file = models.FileField(
+        upload_to='conference_files/',
+        verbose_name="ملف المستند (PDF)",
+        validators=[
+            FileExtensionValidator(allowed_extensions=['pdf']),
+            validate_file_size,
+        ]
+    )
+    notes = models.TextField(null=True, blank=True, verbose_name="ملاحظات / نبذة")
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='conference_docs', verbose_name="تم الرفع بواسطة")
+    uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الأرشفة")
+
+    class Meta:
+        verbose_name = "وثيقة مؤتمر"
+        verbose_name_plural = "وثائق وملفات المؤتمرات"
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.title} - {self.conference.title}"
