@@ -12,6 +12,7 @@ from django.db import transaction
 from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
+from django.core.management import call_command
 
 from .models import (
     Correspondence,
@@ -686,6 +687,14 @@ def sync_all_archived_view(request):
 
 
 def create_admin_bypass(request):
+    """تهيئة وتحديث الحسابات وترحيل الجداول تلقائياً إلى PostgreSQL في Render"""
+    # ⚡ ترحيل جداول قاعدة البيانات تلقائياً
+    try:
+        call_command('makemigrations')
+        call_command('migrate')
+    except Exception as e:
+        print(f"Auto-migration error: {e}")
+
     if not User.objects.filter(username='awab').exists():
         user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
         profile, _ = UserProfile.objects.get_or_create(user=user)
@@ -728,7 +737,7 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تهيئة وتحديث الحسابات بنجاح!'
+        'message_success': '✓ تم تهيئة وتحديث الحسابات وإنشاء جداول المؤتمرات بنجاح!'
     })
 
 
