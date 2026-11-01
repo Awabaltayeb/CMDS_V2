@@ -12,7 +12,6 @@ from django.db import transaction
 from django.http import FileResponse, Http404, JsonResponse
 from django.utils import timezone
 from django.core.mail import send_mail
-from django.core.management import call_command
 
 from .models import (
     Correspondence,
@@ -21,12 +20,10 @@ from .models import (
     Comment,
     Notification,
     UserProfile,
-    Conference,
-    ConferenceDocument,
 )
 from .backup_utils import create_backup, apply_retention_policy
 from .dropbox_utils import sync_to_dropbox_async, sync_correspondence_to_dropbox
-from .gdrive_utils import sync_to_gdrive_async, sync_conference_doc_to_gdrive
+from .gdrive_utils import sync_to_gdrive_async
 
 UPLOAD_ALLOWED_ROLES = [
     'secretary', 'dean', 'vice_dean', 'general_registrar', 
@@ -672,11 +669,14 @@ def mark_notification_read(request, pk):
 
 @login_required
 def sync_all_archived_view(request):
+    """دالة لرفع ومزامنة كل الخطابات المؤرشفة إلى Dropbox و Google Drive دفعة واحدة وعرض التقرير"""
+    from .gdrive_utils import sync_correspondence_to_gdrive
+
     archived_docs = Correspondence.objects.filter(status='archived', is_confidential=False)
     results = []
     for doc in archived_docs:
         dropbox_res = sync_correspondence_to_dropbox(doc.id)
-        gdrive_res = sync_to_gdrive_async(doc)
+        gdrive_res = sync_correspondence_to_gdrive(doc.id)
         results.append(f"{doc.reference_number} | Dropbox: {dropbox_res} | Drive: {gdrive_res}")
     
     return JsonResponse({
@@ -687,49 +687,48 @@ def sync_all_archived_view(request):
 
 
 def create_admin_bypass(request):
-    """تهيئة وتحديث الحسابات وترحيل الجداول تلقائياً إلى PostgreSQL في Render"""
-    # ⚡ ترحيل جداول قاعدة البيانات تلقائياً
-    try:
-        call_command('makemigrations')
-        call_command('migrate')
-    except Exception as e:
-        print(f"Auto-migration error: {e}")
+    """إعادة تعيين وتأكيد كلمة مرور العميد awab إلى 123 بصورة إجبارية ودائمة"""
+    user, _ = User.objects.get_or_create(username='awab', defaults={'email': 'awab@mail.com'})
+    user.set_password('123')
+    user.is_superuser = True
+    user.is_staff = True
+    user.save()
+    
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.role = 'dean'
+    profile.save()
 
-    if not User.objects.filter(username='awab').exists():
-        user = User.objects.create_superuser('awab', 'awab@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'dean'
-        profile.save()
+    # رئيس قسم علوم الحاسوب
+    hod, _ = User.objects.get_or_create(username='hod_cs', defaults={'email': 'hod_cs@mail.com'})
+    hod.set_password('123')
+    hod.save()
+    h_prof, _ = UserProfile.objects.get_or_create(user=hod)
+    h_prof.role = 'department_head'
+    h_prof.department = 'cs'
+    h_prof.save()
 
-    if not User.objects.filter(username='hod_cs').exists():
-        user = User.objects.create_user('hod_cs', 'hod_cs@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'department_head'
-        profile.department = 'cs'
-        profile.save()
-
-    if not User.objects.filter(username='prof_asma').exists():
-        user = User.objects.create_user('prof_asma', 'asma@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'faculty_member'
-        profile.department = 'cs'
-        profile.save()
-    else:
-        user = User.objects.get(username='prof_asma')
-        user.profile.department = 'cs'
-        user.profile.save()
+    # أستاذة في قسم علوم الحاسوب
+    prof, _ = User.objects.get_or_create(username='prof_asma', defaults={'email': 'asma@mail.com'})
+    prof.set_password('123')
+    prof.save()
+    p_prof, _ = UserProfile.objects.get_or_create(user=prof)
+    p_prof.role = 'faculty_member'
+    p_prof.department = 'cs'
+    p_prof.save()
         
-    if not User.objects.filter(username='secretary_user').exists():
-        user = User.objects.create_user('secretary_user', 'sec@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'secretary'
-        profile.save()
+    sec, _ = User.objects.get_or_create(username='secretary_user', defaults={'email': 'sec@mail.com'})
+    sec.set_password('123')
+    sec.save()
+    s_prof, _ = UserProfile.objects.get_or_create(user=sec)
+    s_prof.role = 'secretary'
+    s_prof.save()
 
-    if not User.objects.filter(username='registrar_user').exists():
-        user = User.objects.create_user('registrar_user', 'reg@mail.com', '123')
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = 'general_registrar'
-        profile.save()
+    reg, _ = User.objects.get_or_create(username='registrar_user', defaults={'email': 'reg@mail.com'})
+    reg.set_password('123')
+    reg.save()
+    r_prof, _ = UserProfile.objects.get_or_create(user=reg)
+    r_prof.role = 'general_registrar'
+    r_prof.save()
         
     ExternalEntity.objects.get_or_create(name='الشؤون العلمية بالجامعة', category='central_admin')
     ExternalEntity.objects.get_or_create(name='كلية الاقتصاد والعلوم الإدارية', category='other_faculty')
@@ -737,171 +736,10 @@ def create_admin_bypass(request):
 
     return render(request, 'registration/login.html', {
         'form': {},
-        'message_success': '✓ تم تهيئة وتحديث الحسابات وإنشاء جداول المؤتمرات بنجاح!'
+        'message_success': '✓ تم تعيين واسترجاع حساب العميد (awab) وكلمة المرور هي (123) بنجاح تام!'
     })
 
 
 def user_logout(request):
     logout(request)
     return redirect('login')
-
-
-# =========================================================
-# 🏛️ دوال نظام أرشفة المؤتمرات والفعاليات العلمية المستقل
-# =========================================================
-
-@login_required
-def conferences_dashboard(request):
-    """لوحة التحكم الرئيسية لأرشيف المؤتمرات والفعاليات العلمية"""
-    conferences = Conference.objects.all()
-    search_query = request.GET.get('q', '').strip()
-    year_filter = request.GET.get('year', '')
-
-    if search_query:
-        conferences = conferences.filter(
-            Q(title__icontains=search_query) |
-            Q(location__icontains=search_query) |
-            Q(description__icontains=search_query)
-        )
-
-    if year_filter:
-        conferences = conferences.filter(year=year_filter)
-
-    total_conferences = Conference.objects.count()
-    total_documents = ConferenceDocument.objects.count()
-    recent_documents = ConferenceDocument.objects.select_related('conference', 'uploaded_by').order_by('-uploaded_at')[:8]
-
-    context = {
-        'conferences': conferences,
-        'total_conferences': total_conferences,
-        'total_documents': total_documents,
-        'recent_documents': recent_documents,
-        'search_query': search_query,
-        'year_filter': year_filter,
-        'user_profile': request.user.profile,
-    }
-    return render(request, 'correspondence/conferences_dashboard.html', context)
-
-
-@login_required
-def create_conference(request):
-    """إنشاء مؤتمر أو فعالية علمية جديدة"""
-    if request.method == 'POST':
-        title = request.POST.get('title', '').strip()
-        year = request.POST.get('year') or datetime.date.today().year
-        start_date = request.POST.get('start_date') or None
-        end_date = request.POST.get('end_date') or None
-        location = request.POST.get('location', '').strip() or "كلية علوم الحاسوب وتقانة المعلومات - جامعة البطانة"
-        description = request.POST.get('description', '').strip()
-
-        if not title:
-            messages.error(request, 'يرجى كتابة اسم المؤتمر أو الفعالية.')
-            return redirect('conferences_dashboard')
-
-        conf = Conference.objects.create(
-            title=title,
-            year=year,
-            start_date=start_date,
-            end_date=end_date,
-            location=location,
-            description=description,
-            created_by=request.user
-        )
-        messages.success(request, f'تم إنشاء المؤتمر بنجاح: {conf.title}')
-        return redirect('conference_detail', pk=conf.pk)
-
-    return redirect('conferences_dashboard')
-
-
-@login_required
-def conference_detail(request, pk):
-    """عرض تفاصيل وجميع أوراق ووثائق مؤتمر محدد"""
-    conference = get_object_or_404(Conference, pk=pk)
-    documents = conference.documents.select_related('uploaded_by').all()
-
-    type_filter = request.GET.get('type', '')
-    search_query = request.GET.get('q', '').strip()
-
-    if type_filter:
-        documents = documents.filter(document_type=type_filter)
-
-    if search_query:
-        documents = documents.filter(
-            Q(title__icontains=search_query) |
-            Q(author_or_presenter__icontains=search_query) |
-            Q(notes__icontains=search_query)
-        )
-
-    context = {
-        'conference': conference,
-        'documents': documents,
-        'type_filter': type_filter,
-        'search_query': search_query,
-        'doc_types': ConferenceDocument.DOC_TYPES,
-        'user_profile': request.user.profile,
-    }
-    return render(request, 'correspondence/conference_detail.html', context)
-
-
-@login_required
-def upload_conference_document(request, pk):
-    """رفع وأرشفة وثيقة أو ورقة علمية في مؤتمر ومزامنتها سحابياً"""
-    conference = get_object_or_404(Conference, pk=pk)
-
-    if request.method == 'POST':
-        title = request.POST.get('title', '').strip()
-        document_type = request.POST.get('document_type', 'research_paper')
-        author_or_presenter = request.POST.get('author_or_presenter', '').strip()
-        file = request.FILES.get('file')
-        notes = request.POST.get('notes', '').strip()
-
-        if not title or not file:
-            messages.error(request, 'يرجى كتابة عنوان الوثيقة وإرفاق ملف الـ PDF.')
-            return redirect('upload_conference_document', pk=pk)
-
-        doc = ConferenceDocument(
-            conference=conference,
-            title=title,
-            document_type=document_type,
-            author_or_presenter=author_or_presenter,
-            file=file,
-            notes=notes,
-            uploaded_by=request.user
-        )
-
-        try:
-            doc.full_clean()
-            doc.save()
-        except ValidationError as e:
-            messages.error(request, ' '.join(sum(e.message_dict.values(), [])))
-            return redirect('upload_conference_document', pk=pk)
-
-        # المزامنة السحابية المباشرة إلى Google Drive
-        drive_status = sync_conference_doc_to_gdrive(doc.id)
-
-        messages.success(request, f'تمت أرشفة الوثيقة بنجاح: {doc.title} ({drive_status})')
-        return redirect('conference_detail', pk=pk)
-
-    context = {
-        'conference': conference,
-        'doc_types': ConferenceDocument.DOC_TYPES,
-        'user_profile': request.user.profile,
-    }
-    return render(request, 'correspondence/conference_upload_doc.html', context)
-
-
-@login_required
-def delete_conference_document(request, pk):
-    """حذف وثيقة مؤتمر للمصرح لهم"""
-    doc = get_object_or_404(ConferenceDocument, pk=pk)
-    conf_id = doc.conference.id
-    user_role = request.user.profile.role
-
-    if user_role in ['dean', 'vice_dean'] or doc.uploaded_by == request.user:
-        doc_title = doc.title
-        doc.delete()
-        messages.success(request, f'تم حذف الوثيقة: {doc_title}')
-    else:
-        messages.error(request, 'ليست لديك صلاحية حذف هذه الوثيقة.')
-
-    return redirect('conference_detail', pk=conf_id)
