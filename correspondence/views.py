@@ -155,7 +155,6 @@ def conferences_dashboard(request):
     """وحدة أرشفة وثائق ومخرجات المؤتمرات والفعاليات العلمية بالكلية"""
     user_profile = request.user.profile
     
-    # جلب المعاملات المرتبطة بالمؤتمرات والندوات والشؤون العلمية
     conference_docs = Correspondence.objects.filter(
         Q(scope='central_admin') | 
         Q(subject__icontains='مؤتمر') | 
@@ -181,6 +180,50 @@ def conferences_dashboard(request):
         'unread_notifications_count': request.user.notifications.filter(is_read=False).count(),
     }
     return render(request, 'correspondence/dashboard.html', context)
+
+
+@login_required
+def create_conference(request):
+    """تسجيل وثيقة مؤتمر أو فعالية علمية جديدة"""
+    user_profile = request.user.profile
+    if request.method == 'POST':
+        subject = request.POST.get('subject')
+        document_file = request.FILES.get('file')
+        body_text = request.POST.get('body_text')
+        
+        if subject:
+            corr = Correspondence(
+                subject=f"[وثائق المؤتمرات]: {subject}",
+                direction='incoming',
+                scope='central_admin',
+                addressed_to_type='dean',
+                file=document_file,
+                body_text=body_text,
+                created_by=request.user,
+                status='uploaded'
+            )
+            corr.save()
+            messages.success(request, f'تم تسجيل وثيقة المؤتمر بنجاح برقم: {corr.reference_number}')
+            return redirect('conferences_dashboard')
+            
+    users = User.objects.all()
+    external_entities = ExternalEntity.objects.all()
+    return render(request, 'correspondence/upload_document.html', {
+        'user_profile': user_profile,
+        'is_conference': True,
+        'users': users,
+        'external_entities': external_entities,
+    })
+
+
+@login_required
+def conference_detail(request, pk):
+    return document_detail(request, pk)
+
+
+@login_required
+def edit_conference(request, pk):
+    return edit_document(request, pk)
 
 
 @login_required
