@@ -151,6 +151,39 @@ def dashboard(request):
 
 
 @login_required
+def conferences_dashboard(request):
+    """وحدة أرشفة وثائق ومخرجات المؤتمرات والفعاليات العلمية بالكلية"""
+    user_profile = request.user.profile
+    
+    # جلب المعاملات المرتبطة بالمؤتمرات والندوات والشؤون العلمية
+    conference_docs = Correspondence.objects.filter(
+        Q(scope='central_admin') | 
+        Q(subject__icontains='مؤتمر') | 
+        Q(subject__icontains='ندوة') |
+        Q(subject__icontains='ورشة') |
+        Q(subject__icontains='شؤون علمية')
+    ).order_by('-created_at')
+    
+    context = {
+        'correspondences': conference_docs,
+        'user_profile': user_profile,
+        'upload_allowed_roles': UPLOAD_ALLOWED_ROLES,
+        'backup_allowed_roles': settings.BACKUP_ALLOWED_ROLES,
+        'status_choices': Correspondence.STATUS_CHOICES,
+        'direction_choices': Correspondence.DIR_CHOICES,
+        'scope_choices': Correspondence.SCOPE_CHOICES,
+        'active_folder': 'conferences',
+        'is_conference_view': True,
+        'total_count': conference_docs.count(),
+        'pending_count': conference_docs.filter(status__in=['pending_hod', 'pending_dean']).count(),
+        'archived_count': conference_docs.filter(status='archived').count(),
+        'active_notifications': request.user.notifications.filter(is_read=False)[:5],
+        'unread_notifications_count': request.user.notifications.filter(is_read=False).count(),
+    }
+    return render(request, 'correspondence/dashboard.html', context)
+
+
+@login_required
 def download_backup(request):
     user_profile = request.user.profile
     if user_profile.role not in settings.BACKUP_ALLOWED_ROLES:
